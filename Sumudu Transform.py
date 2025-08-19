@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import scipy
@@ -26,7 +27,6 @@ if not os.path.exists(save_results_to):
 # ====================================
 # Data Gen
 # ====================================
-degree = 500
 
 class Sumudu_Transform(nn.Module):
     def __init__(self, in_channels, out_channels, degree, width, s):
@@ -37,82 +37,102 @@ class Sumudu_Transform(nn.Module):
         self.s = s
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.coefficient = torch.zeros((self.degree))
 
 
-        self.scale = (1 / (in_channels*out_channels))
+        self.scale = (50 / (in_channels*out_channels))
         self.weight1 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, dtype=torch.double))
 
-    def coefficient(self, input):
-        start_amplitude = math.floor(input[0,1,0].item()/(math.sin(.05)*.05))
-        input = np.zeros((input.shape[0], degree))
+    def coefficient_training(self, input, coefficient):
+        start_amplitude = math.floor(input[0,0,1]/(math.sin(.05)*.05))
         amplitude = input.shape[0]
-        for j in range(start_amplitude, start_amplitude + amplitude):
-            for i in range(0,degree):
-                input[j-start_amplitude,i] = j*.05*((-1)**i)*(5**((2*i)+1))/sp.factorial((2*i)+1)
-        output = torch.from_numpy(input)
+        output = torch.zeros((input.shape[0], coefficient.shape[0]), dtype= torch.double,device=input.device)
+        variable_amp = torch.linspace(start_amplitude, start_amplitude + amplitude - 1, steps=amplitude, device=input.device).reshape(amplitude, 1)
+        for i in range(0,coefficient.shape[0]):
+            output[:,i] = .05*((-1)**i)*(5**((2*i)+1))/sp.factorial((2*i)+1)
+        output = torch.mul(output, variable_amp)
+
 
 
         return output
+    def coefficient_validation(self, input, coefficient):
+        start_amplitude = math.floor(input[0,1,0].item()/(math.exp(-.05)*math.sin(.05)*.05))
+        output = torch.zeros((input.shape[0], coefficient.shape[0]), dtype= torch.double,device=input.device)
+        amplitude = input.shape[0]
+        variable_amp = torch.linspace(start_amplitude, start_amplitude + amplitude - 1, steps=amplitude, device=input.device).reshape(amplitude, 1)
+        for i in range(0,coefficient.shape[0]):
+            output[:,i] = .05*(.05**i)*((-1)**i)*(5**((2*i)+1))/sp.factorial((2*i)+1)
+        output = torch.mul(output, variable_amp)
+        
+        return output
 
 
-    def approximate_sum(self, width, input):
-        discretization = torch.linspace(0, (s-1)*.01, s*width).unsqueeze(1).unsqueeze(1)*torch.ones((s*width, input.shape[0], degree))
-        for i in range(0,degree):
+    def approximate_sum(self, width, input, coefficient):
+        input = input.to(torch.float32)
+        discretization = torch.linspace(0, (s-1)*.01, steps = s*width, device=input.device).unsqueeze(1).unsqueeze(1)*torch.ones((s*width, input.shape[0], coefficient.shape[0]), device=input.device)
+        for i in range(0,coefficient.shape[0]):
             discretization[:,:,i] = torch.pow(discretization[:,:,i],i)
-        discretization = discretization.cuda()
         output = torch.einsum("ijk,jk->ji", discretization, input)
         output = output.reshape(input.shape[0], s, width)
+        output = output.permute(0,2,1)
 
         return output
 
 
-    def transform(self, weight1, width, input):
+    def transform(self, weight1, width, input, coefficient):
         # Apply the Sumudu transform to the input
   
-        transformed = np.zeros((input.shape[0],degree))
-        for i in range(0,degree):
-            transformed[:,i] = input[:,i]*sp.factorial((2*i)+1)/width
-        transformed = torch.from_numpy(transformed)
-        transformed = transformed.expand(width, -1, -1).cuda()
+        transformed = torch.zeros((input.shape[0],coefficient.shape[0]), dtype=torch.double, device=input.device)
+        for i in range(0,coefficient.shape[0]):
+            transformed[:,i] = input[:,i]*sp.factorial((2*i)+1)
+        transformed = transformed.expand(width, -1, -1)
 
         transformed = torch.einsum("ibx,io -> bx", transformed, weight1)
         return transformed
-    def inverse_transform(self, weight1, width, input):
+    def inverse_transform(self, input, coefficient):
         # Apply the inverse Sumudu transform to the input weights
-        input = input.detach().cpu().numpy()
-        transformed = np.zeros((input.shape[0],degree))
-        for i in range(0,degree):
-            transformed[:,i] = input[:,i]/(sp.factorial((2*i)+1)*width)
-        transformed = torch.from_numpy(transformed)
-        transformed = transformed.expand(self.width, -1, -1).cuda()
+        transformed = torch.zeros((input.shape[0],coefficient.shape[0]), dtype=torch.double, device=input.device)
+        for i in range(0,coefficient.shape[0]):
+            transformed[:,i] = input[:,i]/(sp.factorial((2*i)+1))
 
-        transformed = torch.einsum("ibx,io -> bx", transformed, weight1)
-        transformed = transformed.float()
         return transformed
 
     def forward(self, x):
-        x = self.coefficient(x)
+        if x in train_loader:
+            x = self.coefficient_training(x, self.coefficient)
+        else:
+            x = self.coefficient_validation(x, self.coefficient)
 
-        x = self.transform(self.weight1, width, x)
+        x = self.transform(self.weight1, width, x, self.coefficient)
 
-        x = self.inverse_transform(self.weight1, width, x)
 
-        x = self.approximate_sum(width, x)
+        x = self.inverse_transform(x, self.coefficient)
+
+
+        x = self.approximate_sum(width, x, self.coefficient)
+
         return x
 
 
 class SNO1d(nn.Module):
-    def __init__(self, width, degree, s):
+    def __init__(self, width, s):
         super(SNO1d, self).__init__()
 
-        self.degree = degree
         self.s = s
         self.width = width
-        self.modes1 = modes
+
         self.fc0 = nn.Linear(1, self.width) 
 
-        self.conv0 = Sumudu_Transform(self.width, self.width, self.degree, self.width, s)
+        self.conv0 = Sumudu_Transform(self.width, self.width, 5, self.width, self.s)
+        self.conv1 = Sumudu_Transform(self.width, self.width, 20, self.width, self.s)
+        
         self.w0 = nn.Conv1d(self.width, self.width, 1)
+        self.w1 = nn.Conv1d(self.width, self.width, 1)
+
+        self.bn0 = torch.nn.BatchNorm1d(self.width)
+        self.bn1 = torch.nn.BatchNorm1d(self.width)
+        self.bn2 = torch.nn.BatchNorm1d(self.width)
+        self.bn3 = torch.nn.BatchNorm1d(self.width)
 
         self.fc1 = nn.Linear(self.width, 128)
         self.fc2 = nn.Linear(128, 1)
@@ -120,18 +140,23 @@ class SNO1d(nn.Module):
     def forward(self,x):
         #grid = self.get_grid(x.shape, x.device)
         #x = torch.cat((x, grid), dim=-1)
-        x2 = self.fc0(x)
+
+        x = self.fc0(x)
+        x = x.permute(0, 2, 1)
+
         x1 = self.conv0(x)
-        x1 = x1.permute(0, 2, 1)
-        x2 = x2.permute(0, 2, 1)
-
-
-        x2 = self.w0(x2)
+        x2 = self.w0(x)
+        x = x1 + x2
+        x = torch.sin(x)
+        x1 = self.conv1(x)
+        x2 = self.w1(x)
         x = x1 +x2
+
+
 
         x = x.permute(0, 2, 1)
         x = self.fc1(x)
-        x =  torch.tanh(x)
+        x = torch.sin(x)
         x = self.fc2(x)
         return x
   
@@ -146,19 +171,21 @@ class SNO1d(nn.Module):
 # ====================================
 s = 2048
 
-degree = 20
 
-batch_size_train = 20
+
+batch_size_train = 50
 batch_size_vali = 20
 
-learning_rate = 0.002
+
 epochs = 1000
 step_size = 100
 gamma = 0.5
 
+learning_rate = .002
 
-modes = 16
-width = 4
+
+
+width = 100
 
 
 
@@ -184,13 +211,13 @@ train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_trai
 vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=True)
 
 # model
-model = SNO1d(width,degree,s).cuda()
+model = SNO1d(width,s).cuda()
 
 
 # ====================================
 # Training 
 # ====================================
-optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
 start_time = time.time()
 myloss = LpLoss(size_average=True)
@@ -212,7 +239,7 @@ for ep in range(epochs):
         out = model(x)   
         mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
         l2 = myloss(out.view(batch_size_train, -1), y.view(batch_size_train, -1))
-        l2.backward()
+        mse.backward()
 
         optimizer.step()
         train_mse += mse.item()
