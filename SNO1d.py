@@ -40,8 +40,9 @@ class Sumudu_Transform(nn.Module):
         self.out_channels = out_channels
 
 
-        self.scale = (.2 / (in_channels*out_channels))
+        self.scale = (1 / (in_channels*out_channels))
         self.weight1 = nn.Parameter((self.scale*torch.rand(in_channels, out_channels, dtype=torch.double)))
+        self.weight2 = nn.Parameter((self.scale*torch.rand(in_channels, out_channels, dtype=torch.double)))
 
     def coefficient_training(self, input, degree):
         start_amplitude = math.floor(input[0,0,1]/(math.sin(.05)*.05))
@@ -89,11 +90,14 @@ class Sumudu_Transform(nn.Module):
         transformed = torch.einsum("ibx,io -> bx", transformed, weight1)
 
         return transformed
-    def inverse_transform(self, input, degree):
+    def inverse_transform(self, weight2, width, input, degree):
         # Apply the inverse Sumudu transform to the input weights
         transformed = torch.zeros((input.shape[0],degree), dtype=torch.double, device=input.device)
         for i in range(0,degree):
             transformed[:,i] = input[:,i]/(sp.factorial((2*i)+1))
+        transformed = transformed.expand(width, -1, -1)
+
+        transformed = torch.einsum("ibx,io -> bx", transformed, weight2)
 
         return transformed
 
@@ -106,7 +110,7 @@ class Sumudu_Transform(nn.Module):
         x = self.transform(self.weight1, width, x, self.degree)
 
 
-        x = self.inverse_transform(x, self.degree)
+        x = self.inverse_transform(self.weight2, width, x, self.degree)
 
 
         x = self.approximate_sum(width, x, self.degree)
@@ -186,7 +190,7 @@ learning_rate = .002
 
 
 
-width = 8
+width = 4
 
 
 
