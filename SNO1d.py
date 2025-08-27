@@ -31,10 +31,11 @@ if not os.path.exists(save_results_to):
 # ====================================
 
 class Sumudu_Transform(nn.Module):
-    def __init__(self, in_channels, out_channels, degree, width, s):
+    def __init__(self, in_channels, out_channels, degree, modes, width, s):
         super(Sumudu_Transform, self).__init__()
         
         self.degree = degree
+        self.modes1 = modes
         self.width = width
         self.s = s
         self.in_channels = in_channels
@@ -43,7 +44,7 @@ class Sumudu_Transform(nn.Module):
 
         self.scale = (1 / (in_channels*out_channels))
         self.flip = (-1)**torch.randint(0,2,(in_channels, out_channels))
-        self.weight1 = nn.Parameter((self.scale*torch.normal(mean= torch.ones((in_channels, out_channels), dtype= torch.double), std= .01*torch.ones((in_channels, out_channels), dtype= torch.double))))
+        self.weight1 = nn.Parameter((self.scale*torch.normal(mean= torch.ones((in_channels, out_channels, self.modes1), dtype= torch.double), std= .01*torch.ones((in_channels, out_channels, self.modes1), dtype= torch.double))))
         self.weight2 = nn.Parameter((self.scale*torch.rand((in_channels, out_channels), dtype=torch.double)))
 
 
@@ -97,14 +98,14 @@ class Sumudu_Transform(nn.Module):
 
     def transform_training(self, weight1, width, input):
         # Apply the Sumudu transform to the input
-        transformed = input.expand(width, -1, -1)/width
+        transformed = input[:,:self.modes1].expand(width, -1, -1)/width
 
-        transformed = torch.einsum("ibx,io -> bx", transformed, weight1)
+        transformed = torch.einsum("ibx,iox -> bx", transformed, weight1)
         return transformed
     def transform_validation(self, weight1, width, input):
-        transformed = input.expand(width, -1, -1)/width
+        transformed = input[:,:self.modes1].expand(width, -1, -1)/width
 
-        transformed = torch.einsum("ibx,io -> bx", transformed, weight1)
+        transformed = torch.einsum("ibx,iox -> bx", transformed, weight1)
         return transformed
     def inverse_transform_training(self, input):
         # Apply the inverse Sumudu transform to the input weights
@@ -149,15 +150,16 @@ class Sumudu_Transform(nn.Module):
 
 
 class SNO1d(nn.Module):
-    def __init__(self, width, s):
+    def __init__(self, degree, modes1, width, s):
         super(SNO1d, self).__init__()
-
+        self.degree = degree
         self.s = s
+        self.modes1 = modes1
         self.width = width
 
         self.fc0 = nn.Linear(1, self.width) 
 
-        self.conv0 = Sumudu_Transform(self.width, self.width, 200, self.width, self.s)
+        self.conv0 = Sumudu_Transform(self.width, self.width, self.degree, self.modes1, self.width, self.s)
 
         
         self.w0 = nn.Conv1d(self.width, self.width, 1)
@@ -198,8 +200,8 @@ class SNO1d(nn.Module):
 #  Define parameters and Load data
 # ====================================
 s = 2048
-
-
+degree = 100
+modes1 = 16
 
 batch_size_train = 20
 batch_size_vali = 20
@@ -239,7 +241,7 @@ train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_trai
 vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=True)
 
 # model
-model = SNO1d(width,s).cuda()
+model = SNO1d(degree, modes1, width,s).cuda()
 
 
 # ====================================
