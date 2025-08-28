@@ -270,7 +270,7 @@ for ep in range(epochs):
         mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
         l2 = myloss(out.view(batch_size_train, -1), y.view(batch_size_train, -1))
         l2.backward()
-
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         train_mse += mse.item()
         train_l2 += l2.item()
@@ -367,3 +367,4 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
