@@ -133,7 +133,7 @@ save_results_to = results_dir + "/"
 ################################################################
 # Load data (same format as LNO repo Duffing)
 ################################################################
-reader = MatReader("/content/drive/MyDrive/FNORep/fourier_neural_operator-master/data/data.mat")  # <--- path to your Duffing data
+reader = MatReader("/Data/Df0data.mat")  # <--- path to your 1D data
 x_train = reader.read_field('f_train')
 y_train = reader.read_field('u_train')
 x_vali  = reader.read_field('f_vali')
