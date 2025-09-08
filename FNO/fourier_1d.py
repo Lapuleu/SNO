@@ -135,11 +135,10 @@ class main():
     s = 2048
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     ################################################################
     # Load data (same format as LNO repo Duffing)
     ################################################################
-    reader = MatReader(dataFile)  # <--- path to your Duffing data
+    reader = MatReader(self.dataFile)  # <--- path to your Duffing data
     x_train = reader.read_field('f_train')
     y_train = reader.read_field('u_train')
     x_vali  = reader.read_field('f_vali')
