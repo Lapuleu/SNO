@@ -43,17 +43,15 @@ class Sumudu_Transform(nn.Module):
 
 
         self.flip = (-1)**torch.randint(0,2,(in_channels, out_channels))
-        self.scale = (1 / (in_channels*out_channels))
-        self.weight2 = nn.Parameter((self.scale*torch.normal(mean= torch.ones((in_channels, out_channels), dtype= torch.double), std= .01*torch.ones((in_channels, out_channels), dtype= torch.double))))
+        self.scale = (self.flip / (in_channels*out_channels))
         self.weight1 = nn.Parameter((self.scale*torch.rand((in_channels, out_channels), dtype=torch.double)))
+        print(self.weight1)
 
 
     def coefficient_training(self, input, degree):
         output = torch.zeros((input.shape[0], degree), dtype= torch.double,device=input.device)
         amplitude = input.shape[0]
-        variable_amp = torch.zeros(amplitude, device= input.device)
-        for i in range(amplitude):
-            variable_amp[i] = math.floor(input[i,0,1].item()/(math.sin(.05)*.05))
+        variable_amp = input[:,0,1]/(.05*math.sin(.05))
         input = input.reshape((input.shape[0],input.shape[1]*input.shape[2],1))
         input_np = input.detach().cpu().numpy()
         n = np.arange(degree)
@@ -83,7 +81,7 @@ class Sumudu_Transform(nn.Module):
         
         return output
     def approximate_sum(self, width, input):
-        discretization = torch.linspace(0, (s-1)*.01, steps = s*width, dtype=torch.double, device=input.device)
+        discretization = torch.linspace(0, (s)*.01, steps = s*width, dtype=torch.double, device=input.device)
         row_powers = torch.linspace(1, input.shape[1], steps = input.shape[1], dtype=torch.double, device=input.device).unsqueeze(1)
         discretization = discretization**row_powers
         output = torch.einsum("dx,ad->ax", discretization, input)
@@ -150,7 +148,6 @@ class SNO1d(nn.Module):
         #x = torch.cat((x, grid), dim=-1)
 
         x = self.fc0(x)
-
         x = x.permute(0, 2, 1)
         x1 = self.conv0(x)
         x2 = self.w0(x)
@@ -158,7 +155,7 @@ class SNO1d(nn.Module):
 
         x = x1 + x2
 
-        x = torch.tanh(x)
+        x = torch.sin(x)
         x = x.float()
         x1 = self.conv1(x)
         x2 = self.w1(x)
@@ -170,7 +167,7 @@ class SNO1d(nn.Module):
         x = x.permute(0, 2, 1)
         x = x.float()
         x = self.fc1(x)
-        x = torch.tanh(x)
+        x = torch.sin(x)
         x = self.fc2(x)
         return x
   
@@ -184,7 +181,7 @@ class SNO1d(nn.Module):
 #  Define parameters and Load data
 # ====================================
 s = 2048
-degree = 10
+degree = 20
 
 batch_size_train = 20
 batch_size_vali = 20
@@ -194,7 +191,7 @@ epochs = 1000
 step_size = 100
 gamma = 0.5
 
-learning_rate = .003
+learning_rate = .0001
 
 
 
@@ -230,7 +227,7 @@ model = SNO1d(degree, width,s).cuda()
 # ====================================
 # Training 
 # ====================================
-optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0)
+optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=.0001)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
 start_time = time.time()
 myloss = LpLoss(size_average=True)
@@ -252,8 +249,8 @@ for ep in range(epochs):
         out = model(x)   
         mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
         l2 = myloss(out.view(batch_size_train, -1), y.view(batch_size_train, -1))
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         l2.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0)
         optimizer.step()
         train_mse += mse.item()
         train_l2 += l2.item()
