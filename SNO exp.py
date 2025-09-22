@@ -43,42 +43,32 @@ class Sumudu_Transform(nn.Module):
 
 
         self.flip = (-1)**torch.randint(0,2,(in_channels, out_channels))
-        self.scale = (self.flip / (in_channels*out_channels))
+        self.scale = (1 / (in_channels*out_channels))
         self.weight1 = nn.Parameter((self.scale*torch.rand((in_channels, out_channels), dtype=torch.double)))
-        print(self.weight1)
 
 
     def coefficient_training(self, input, degree):
         output = torch.zeros((input.shape[0], degree), dtype= torch.double,device=input.device)
         amplitude = input.shape[0]
-        variable_amp = input[:,0,1]/(.05*math.sin(.05))
-        input = input.reshape((input.shape[0],input.shape[1]*input.shape[2],1))
+        variable_amp = input[:,0,1].unsqueeze(1)/(.05*math.sin(.05))
+        input_size = input.shape[1]*input.shape[2]//degree
+        input = input.reshape(-1, input.shape[1]*input.shape[2])
+        input = input[:,:(degree+1)].permute(1,0)
         input_np = input.detach().cpu().numpy()
-        n = np.arange(degree)
-        m = np.arange(degree).reshape(-1,1)
+        n = np.arange(degree+1)
+        m = np.arange(degree+1).reshape(-1,1)
         binoms = sp.comb(m,n)
         signs = (-1)**(n+m)
-        numerator = (signs*binoms)@input_np[0,:degree,0]
-        denominator = .005**n
-        output = numerator/denominator.flatten()
+        numerator = (signs*binoms)@input_np
+        denominator = (.0025*input_size)**n
+        output = numerator.transpose(1,0)/denominator.flatten()
         output = torch.from_numpy(output).to(device='cuda', dtype=torch.double)
-        output = torch.outer(variable_amp, output)
+        output = torch.mul(variable_amp, output)
 
 
 
 
-        return output
-    def coefficient_validation(self, input, degree):
-        output = torch.zeros((input.shape[0], degree), dtype= torch.double,device=input.device)
-        amplitude = input.shape[0]
-        variable_amp = torch.zeros(amplitude, device=input.device)
-        for i in range(amplitude):
-            variable_amp[i] = math.floor(input[i,0,1].item()/(math.exp(-.05)*math.sin(.05)*.05))
-        variable_amp = variable_amp.unsqueeze(1)
-        for i in range(degree):
-            output[:,i] = (((-.05+5j)**i)).imag
-        output = torch.mul(output, variable_amp)
-        
+
         return output
     def approximate_sum(self, width, input):
         discretization = torch.linspace(0, (s)*.01, steps = s*width, dtype=torch.double, device=input.device)
@@ -96,30 +86,22 @@ class Sumudu_Transform(nn.Module):
         return transformed
     def inverse_transform_training(self, input):
         # Apply the inverse Sumudu transform to the input weights
-        transformed = torch.zeros((input.shape[0],input.shape[1]), dtype=torch.double, device=input.device)
-        for i in range(0,input.shape[1]):
-            transformed[:,i] = input[:,i]/(sp.factorial((2*i)+1))
-
-
-        return transformed
-    def inverse_transform_validation(self, input):
-        # Apply the inverse Sumudu transform to the input weights
-        transformed = torch.zeros((input.shape[0],input.shape[1]), dtype=torch.double, device=input.device)
-        for i in range(0,input.shape[1]):
-            transformed[:,i] = input[:,i]/sp.factorial((i))
+        transformed = torch.linspace(1,degree+1, steps= degree+1, dtype= torch.double, device=input.device)
+        transformed = torch.div(input,torch.exp(torch.lgamma(transformed+1)))
 
 
         return transformed
     def forward(self, x):
         x = self.coefficient_training(x, self.degree)
-        x = self.approximate_sum(width, x)
+        print(x)
+        x = self.approximate_sum(self.width, x)
+        print(x)
         x = self.weight_mul(self.weight1, x)
         x = self.coefficient_training(x, self.degree)
         x = self.inverse_transform_training(x)
 
 
-        x = self.approximate_sum(width, x)
-
+        x = self.approximate_sum(self.width, x)
 
 
         return x
@@ -133,6 +115,7 @@ class SNO1d(nn.Module):
         self.width = width
 
         self.fc0 = nn.Linear(1, self.width) 
+        self.layer_norm = nn.LayerNorm(self.width)
 
         self.conv0 = Sumudu_Transform(self.width, self.width, self.degree, self.width, self.s)
         self.conv1 = Sumudu_Transform(self.width, self.width, self.degree, self.width, self.s)
@@ -140,34 +123,33 @@ class SNO1d(nn.Module):
         self.w0 = nn.Conv1d(self.width, self.width, 1)
         self.w1 = nn.Conv1d(self.width, self.width, 1)
 
+        self.bn0 = nn.BatchNorm1d(self.width)
+        self.bn1 = nn.BatchNorm1d(self.width)
+
         self.fc1 = nn.Linear(self.width, 128)
         self.fc2 = nn.Linear(128, 1)
 
     def forward(self,x):
         #grid = self.get_grid(x.shape, x.device)
         #x = torch.cat((x, grid), dim=-1)
-
         x = self.fc0(x)
         x = x.permute(0, 2, 1)
         x1 = self.conv0(x)
         x2 = self.w0(x)
 
 
-        x = x1 + x2
-
-        x = torch.sin(x)
-        x = x.float()
+        x = self.bn0((x1 + x2).float())
+        x = torch.tanh(x)
         x1 = self.conv1(x)
         x2 = self.w1(x)
-        x = x1 + x2
 
+        x = self.bn1((x1 + x2).float())
 
 
 
         x = x.permute(0, 2, 1)
-        x = x.float()
         x = self.fc1(x)
-        x = torch.sin(x)
+        x = torch.tanh(x)
         x = self.fc2(x)
         return x
   
@@ -181,7 +163,7 @@ class SNO1d(nn.Module):
 #  Define parameters and Load data
 # ====================================
 s = 2048
-degree = 20
+degree = 500
 
 batch_size_train = 20
 batch_size_vali = 20
@@ -191,7 +173,7 @@ epochs = 1000
 step_size = 100
 gamma = 0.5
 
-learning_rate = .0001
+learning_rate = .001
 
 
 
@@ -200,7 +182,7 @@ width = 4
 
 
 
-reader = MatReader(r'C:\Users\benze\Downloads\SNO main\1D_Duffing\Data\data_Duffing.mat')
+reader = MatReader(r'C:\Users\benze\Downloads\SNO main\1D_Duffing\Data\data.Lorenz10.mat')
 x_train = reader.read_field('f_train')
 y_train = reader.read_field('u_train')
 grid_x_train = reader.read_field('x_train')
@@ -227,6 +209,7 @@ model = SNO1d(degree, width,s).cuda()
 # ====================================
 # Training 
 # ====================================
+torch.autograd.set_detect_anomaly(True)
 optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=.0001)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
 start_time = time.time()
@@ -249,7 +232,6 @@ for ep in range(epochs):
         out = model(x)   
         mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
         l2 = myloss(out.view(batch_size_train, -1), y.view(batch_size_train, -1))
-        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         l2.backward()
         optimizer.step()
         train_mse += mse.item()
