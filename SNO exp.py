@@ -2,7 +2,7 @@
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import torchaudio.functional as AF
+import Chebyshev
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
@@ -14,6 +14,41 @@ from Adam import Adam
 import time
 import math
 import scipy.special as sp
+from torch_dct import dct, idct
+import warnings
+warnings.simplefilter('ignore', np.exceptions.RankWarning)
+'''def get_grid(f):
+    x_k = torch.linspace(0, degree-2, degree-1, dtype=torch.double, device=f.device)
+    x_n = -torch.cos(torch.pi*(x_k+.5)/degree)
+    x = (f.shape[-1]-1)*.01+(f.shape[-1]-1)*.01*x_n
+    f = torch.index_select(f,-1,x.long())
+    return f
+def fct(f):
+    # Reverse rows like f(end:-1:1,:) in MATLAB
+    f = f.flip(dims=(2,))
+
+    # Get dimensions
+    A = f.shape
+    N = A[2]
+    a = torch.zeros_like(f, dtype=float)
+    a = math.sqrt(2 / N) * dct(f,norm=None)
+    a[0, :, :] /= math.sqrt(2)
+
+    return a
+def ifct(a, l=None):
+    # Get dimensions
+    k = a.shape
+    N = k[0]
+
+    # Adjust scaling: first row multiplied by sqrt(2), others unchanged
+    a[:,:,0] = math.sqrt(2) * a[:,:,0]
+
+    # Apply inverse DCT (along axis 0)
+    f = idct(math.sqrt(N / 2) * a,norm=None)
+    # Reverse rows like f(end:-1:1,:) in MATLAB
+    f = f.flip(dims=(2,))
+
+    return f'''
 # ====================================
 # saving settings
 # ====================================
@@ -44,64 +79,69 @@ class Sumudu_Transform(nn.Module):
 
         self.flip = (-1)**torch.randint(0,2,(in_channels, out_channels))
         self.scale = (1 / (in_channels*out_channels))
-        self.weight1 = nn.Parameter((self.scale*torch.rand((in_channels, out_channels), dtype=torch.double)))
-
+        self.weight1 = nn.Parameter((self.scale*torch.rand((in_channels, out_channels), dtype=torch.float64)))
 
     def coefficient_training(self, input, degree):
-        output = torch.zeros((input.shape[0], degree), dtype= torch.double,device=input.device)
-        amplitude = input.shape[0]
-        variable_amp = input[:,0,1].unsqueeze(1)/(.05*math.sin(.05))
-        input_size = input.shape[1]*input.shape[2]//degree
-        input = input.reshape(-1, input.shape[1]*input.shape[2])
-        input = input[:,:(degree+1)].permute(1,0)
-        input_np = input.detach().cpu().numpy()
-        n = np.arange(degree+1)
-        m = np.arange(degree+1).reshape(-1,1)
-        binoms = sp.comb(m,n)
-        signs = (-1)**(n+m)
-        numerator = (signs*binoms)@input_np
-        denominator = (.0025*input_size)**n
-        output = numerator.transpose(1,0)/denominator.flatten()
-        output = torch.from_numpy(output).to(device='cuda', dtype=torch.double)
-        output = torch.mul(variable_amp, output)
-
-
-
-
+        ##input = get_grid(input)
+        ##output = fct(input)
+        output = input.reshape(input.shape[0]*input.shape[1], input.shape[2]).permute(1,0)
+        output = torch.from_numpy(np.polyfit(np.linspace(0, (s-1)*.01, s, dtype=np.float64), output.detach().cpu().numpy(), degree-1)).to('cuda').float().permute(1,0)
+        output = output.reshape(input.shape[0], input.shape[1], degree)    
+        
 
         return output
+    def transform(self, input):
+        fact = torch.from_numpy(sp.factorial(np.linspace(0, input.shape[2]-1, input.shape[2], dtype=np.float64))).to('cuda').flip((0,))
+        output = torch.mul(input, fact)
+        return output
+    def inverse_transform(self, input):
+        ##input = input.reshape(-1, input.shape[1]*input.shape[2]).detach().cpu().numpy()
+        ##output = np.zeros((input.shape[0], s*width), dtype= np.double)
+        ##for i in range(input.shape[0]):
+        ##    output[i, :] = chebyshev.cheby_idct(input[i,:])
+        ##factorial = torch.from_numpy(sp.factorial(np.linspace(0,s*width-1, s*width, dtype= np.double))).to('cuda').double()
+        ##output = torch.from_numpy(output).to('cuda').double()
+        ##output = torch.mul(output, factorial)
+        ##output = ifct(input)
+        fact = torch.from_numpy(sp.factorial(np.linspace(0, input.shape[2]-1, input.shape[2], dtype=np.float64))).to('cuda').flip((0,))
+        output = torch.div(input, fact)
+        return output
+
     def approximate_sum(self, width, input):
-        discretization = torch.linspace(0, (s)*.01, steps = s*width, dtype=torch.double, device=input.device)
-        row_powers = torch.linspace(1, input.shape[1], steps = input.shape[1], dtype=torch.double, device=input.device).unsqueeze(1)
+        '''discretization = torch.linspace(0, (s)*.01, steps = s, dtype=torch.float, device=input.device)
+        row_powers = torch.linspace(1, input.shape[2], steps = input.shape[2], dtype=torch.float, device=input.device).unsqueeze(1)
         discretization = discretization**row_powers
-        output = torch.einsum("dx,ad->ax", discretization, input)
+        output = torch.einsum("aid,dx->aix", input, discretization)
         output = output.reshape(input.shape[0], s, width)
         output = output.permute(0,2,1)
-
+        output = torch.zeros((input.shape[0], width, s), dtype= torch.float, device=input.device)
+        for i in range(input.shape[0]):
+            for j in range(width):
+                output[i,j,:] = torch.from_numpy(chebyshev.cheby_sum(np.linspace(0, (s-1)*.01, s, dtype=float),input[i,j,:].detach().cpu().numpy(), 0,((s-1)*.01))).to('cuda').float()
+'''     
+        x = np.linspace(0, (s-1)*.01, s, dtype=np.float64)
+        output = torch.zeros(input.shape[0], input.shape[1], s, dtype= torch.float64, device=input.device)
+        for i in range(input.shape[0]):
+            for k in range(input.shape[1]):
+                output[i,k,:] = torch.from_numpy(np.polyval(input[i,k,:].detach().cpu().numpy(), x))
         return output
 
 
     def weight_mul(self, weight1, input):
         transformed = torch.einsum("bix,io -> box", input, weight1)
         return transformed
-    def inverse_transform_training(self, input):
-        # Apply the inverse Sumudu transform to the input weights
-        transformed = torch.linspace(1,degree+1, steps= degree+1, dtype= torch.double, device=input.device)
-        transformed = torch.div(input,torch.exp(torch.lgamma(transformed+1)))
-
 
         return transformed
     def forward(self, x):
         x = self.coefficient_training(x, self.degree)
-        print(x)
+        x = self.transform(x)
         x = self.approximate_sum(self.width, x)
-        print(x)
         x = self.weight_mul(self.weight1, x)
         x = self.coefficient_training(x, self.degree)
-        x = self.inverse_transform_training(x)
+        x = self.inverse_transform(x)
 
 
-        x = self.approximate_sum(self.width, x)
+        x = self.approximate_sum(self.width, x).float()
 
 
         return x
@@ -123,9 +163,6 @@ class SNO1d(nn.Module):
         self.w0 = nn.Conv1d(self.width, self.width, 1)
         self.w1 = nn.Conv1d(self.width, self.width, 1)
 
-        self.bn0 = nn.BatchNorm1d(self.width)
-        self.bn1 = nn.BatchNorm1d(self.width)
-
         self.fc1 = nn.Linear(self.width, 128)
         self.fc2 = nn.Linear(128, 1)
 
@@ -138,18 +175,18 @@ class SNO1d(nn.Module):
         x2 = self.w0(x)
 
 
-        x = self.bn0((x1 + x2).float())
+        x = x1 + x2
         x = torch.tanh(x)
         x1 = self.conv1(x)
         x2 = self.w1(x)
 
-        x = self.bn1((x1 + x2).float())
+        x = x1 + x2
 
 
 
         x = x.permute(0, 2, 1)
         x = self.fc1(x)
-        x = torch.tanh(x)
+        x = torch.sin(x)
         x = self.fc2(x)
         return x
   
@@ -163,7 +200,7 @@ class SNO1d(nn.Module):
 #  Define parameters and Load data
 # ====================================
 s = 2048
-degree = 500
+degree = 15
 
 batch_size_train = 20
 batch_size_vali = 20
@@ -177,12 +214,12 @@ learning_rate = .001
 
 
 
-width = 4
+width = 16
 
 
 
 
-reader = MatReader(r'C:\Users\benze\Downloads\SNO main\1D_Duffing\Data\data.Lorenz10.mat')
+reader = MatReader(r'C:\Users\benze\Downloads\SNO main\1D_Duffing\Data\data_Duffing.mat')
 x_train = reader.read_field('f_train')
 y_train = reader.read_field('u_train')
 grid_x_train = reader.read_field('x_train')
@@ -210,7 +247,7 @@ model = SNO1d(degree, width,s).cuda()
 # Training 
 # ====================================
 torch.autograd.set_detect_anomaly(True)
-optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=.0001)
+optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
 start_time = time.time()
 myloss = LpLoss(size_average=True)
