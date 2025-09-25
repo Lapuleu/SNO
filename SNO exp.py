@@ -2,7 +2,6 @@
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import Chebyshev
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
@@ -166,6 +165,9 @@ class SNO1d(nn.Module):
         self.fc1 = nn.Linear(self.width, 128)
         self.fc2 = nn.Linear(128, 1)
 
+        self.bn0 = torch.nn.BatchNorm1d(self.width)
+        self.bn1 = torch.nn.BatchNorm1d(self.width)
+
     def forward(self,x):
         #grid = self.get_grid(x.shape, x.device)
         #x = torch.cat((x, grid), dim=-1)
@@ -175,12 +177,12 @@ class SNO1d(nn.Module):
         x2 = self.w0(x)
 
 
-        x = x1 + x2
+        x = self.bn0(x1 + x2)
         x = F.leaky_relu(x)
         x1 = self.conv1(x)
         x2 = self.w1(x)
 
-        x = x1 + x2
+        x = self.bn1(x1 + x2)
 
 
 
@@ -366,4 +368,5 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
 
