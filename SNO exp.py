@@ -13,7 +13,6 @@ from Adam import Adam
 import time
 import math
 import scipy.special as sp
-from torch_dct import dct, idct
 import warnings
 warnings.simplefilter('ignore', np.exceptions.RankWarning)
 '''def get_grid(f):
@@ -368,5 +367,6 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
 
 
