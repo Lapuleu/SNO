@@ -187,7 +187,7 @@ class SNO1d(nn.Module):
 
         x = x.permute(0, 2, 1)
         x = self.fc1(x)
-        x = torch.tanh(x)
+        x = torch.sin(x)
         x = self.fc2(x)
         return x
   
@@ -367,6 +367,7 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
 
 
 
