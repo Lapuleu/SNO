@@ -1,4 +1,5 @@
 
+
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
@@ -149,7 +150,7 @@ class Sumudu_Transform(nn.Module):
 
 
 class SNO2d(nn.Module):
-    def __init__(self, width):
+    def __init__(self, width, s):
         super(SNO2d, self).__init__()
 
         self.width = width
@@ -157,6 +158,7 @@ class SNO2d(nn.Module):
 
         self.conv0 = Sumudu_Transform(self.width, self.width, degree, self.width, s)
         self.w0 = nn.Conv2d(self.width, self.width, 1)
+        self.w1 = nn.Conv2d(self.width, self.width, 1)
         self.norm = nn.InstanceNorm2d(self.width)
 
         self.fc1 = nn.Linear(self.width, 128)
@@ -171,6 +173,10 @@ class SNO2d(nn.Module):
         x1 = self.norm(self.conv0(self.norm(x)))
         x2 = self.w0(x)
         x = x1 +x2
+        x = F.leaky_relu(x)
+        x1 = self.norm(self.conv0(self.norm(x)))
+        x2 = self.w1(x)
+        x = x1+x2
 
         x = x.permute(0, 2, 3, 1)
         x = self.fc1(x)
@@ -178,54 +184,7 @@ class SNO2d(nn.Module):
         x = self.fc2(x)
         return x
 
-    def get_grid(self, shape, device):
-        batchsize, size_x, size_y = shape[0], shape[1], shape[2]
-        gridx = torch.tensor(np.linspace(0, 1, size_x), dtype=torch.float)
-        gridx = gridx.reshape(1, size_x, 1, 1).repeat([batchsize, 1, size_y, 1])
-        gridy = torch.tensor(np.linspace(0, 1, size_y), dtype=torch.float)
-        gridy = gridy.reshape(1, 1, size_y, 1).repeat([batchsize, size_x, 1, 1])
-        return torch.cat((gridx, gridy), dim=-1).to(device)
-    def __init__(self, degree, width, s):
-        super(SNO1d, self).__init__()
-        self.degree = degree
-        self.s = s
-        self.width = width
 
-        self.fc0 = nn.Linear(1, self.width) 
-        self.layer_norm = nn.LayerNorm(self.width)
-
-        self.conv0 = Sumudu_Transform(self.width, self.width, self.degree, self.width, self.s)
-        self.conv1 = Sumudu_Transform(self.width, self.width, self.degree, self.width, self.s)
-        
-        self.w0 = nn.Conv1d(self.width, self.width, 1)
-        self.w1 = nn.Conv1d(self.width, self.width, 1)
-
-        self.fc1 = nn.Linear(self.width, 128)
-        self.fc2 = nn.Linear(128, 1)
-
-    def forward(self,x):
-        #grid = self.get_grid(x.shape, x.device)
-        #x = torch.cat((x, grid), dim=-1)
-        x = self.fc0(x)
-        x = x.permute(0, 2, 1)
-        x1 = self.conv0(x)
-        x2 = self.w0(x)
-
-
-        x = x1 + x2
-        x = F.leaky_relu(x)
-        x1 = self.conv1(x)
-        x2 = self.w1(x)
-
-        x = x1 + x2
-
-
-
-        x = x.permute(0, 2, 1)
-        x = self.fc1(x)
-        x = torch.tanh(x)
-        x = self.fc2(x)
-        return x
   
     def get_grid(self, shape, device):
         batchsize, size_x = shape[0], shape[1]
@@ -274,7 +233,7 @@ x_test = x_test.reshape(ntest,x_test.shape[1],x_test.shape[2],1)
 train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size_train, shuffle=False)
 vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=False)
 # model
-model = SNO2d(width).cuda()
+model = SNO2d(width, s).cuda()
 
 # ====================================
 # Training 
@@ -399,5 +358,3 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
-
-
