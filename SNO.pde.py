@@ -173,10 +173,6 @@ class SNO2d(nn.Module):
         x1 = self.norm(self.conv0(self.norm(x)))
         x2 = self.w0(x)
         x = x1 +x2
-        x = F.leaky_relu(x)
-        x1 = self.norm(self.conv0(self.norm(x)))
-        x2 = self.w1(x)
-        x = x1+x2
 
         x = x.permute(0, 2, 3, 1)
         x = self.fc1(x)
@@ -197,7 +193,7 @@ class SNO2d(nn.Module):
 # ====================================
 #  Define parameters and Load data
 # ====================================
-degree = 15
+degree = 9
 s = 50
 ntrain = 200
 nvali = 50
