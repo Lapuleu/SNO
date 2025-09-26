@@ -200,7 +200,7 @@ class SNO1d(nn.Module):
         x2 = self.w0(x)
 
         x = x1 + x2
-        x = torch.sin(x)
+        x = F.leaky_relu(x)
 
         x1 = x.float()
         x1 = self.conv1(x1)
@@ -393,4 +393,5 @@ ax.set_yscale('log')
 ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
+
 fig.savefig(save_results_to+'loss_history.png')
