@@ -1,14 +1,7 @@
-'''
-Module Description:
-------
-This module implements the Laplace Neural Operator for beam (Example 7 in LNO paper)
-Author: 
-------
-Qianying Cao (qianying_cao@brown.edu)
-'''
 
-import torch
+
 import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import scipy
@@ -16,77 +9,156 @@ import matplotlib.pyplot as plt
 import os
 import time
 from timeit import default_timer
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
 from D2utilities3 import *
 from D2Adam import Adam
 import time
+import math
+import scipy.special as sp
+import warnings
+warnings.simplefilter('ignore', np.exceptions.RankWarning)
+'''def get_grid(f):
+    x_k = torch.linspace(0, degree-2, degree-1, dtype=torch.double, device=f.device)
+    x_n = -torch.cos(torch.pi*(x_k+.5)/degree)
+    x = (f.shape[-1]-1)*.01+(f.shape[-1]-1)*.01*x_n
+    f = torch.index_select(f,-1,x.long())
+    return f
+def fct(f):
+    # Reverse rows like f(end:-1:1,:) in MATLAB
+    f = f.flip(dims=(2,))
 
+    # Get dimensions
+    A = f.shape
+    N = A[2]
+    a = torch.zeros_like(f, dtype=float)
+    a = math.sqrt(2 / N) * dct(f,norm=None)
+    a[0, :, :] /= math.sqrt(2)
 
+    return a
+def ifct(a, l=None):
+    # Get dimensions
+    k = a.shape
+    N = k[0]
+
+    # Adjust scaling: first row multiplied by sqrt(2), others unchanged
+    a[:,:,0] = math.sqrt(2) * a[:,:,0]
+
+    # Apply inverse DCT (along axis 0)
+    f = idct(math.sqrt(N / 2) * a,norm=None)
+    # Reverse rows like f(end:-1:1,:) in MATLAB
+    f = f.flip(dims=(2,))
+
+    return f'''
 # ====================================
-#  Laplace layer: pole-residue operation is used to calculate the poles and residues of the output
-# ====================================  
+# saving settings
+# ====================================
+save_index = 1   
+current_directory = os.getcwd()
+case = "Case_"
+folder_index = str(save_index)
 
-class PR2d(nn.Module):
-    def __init__(self, in_channels, out_channels, modes1, modes2):
-        super(PR2d, self).__init__()
+results_dir = "/" + case + folder_index +"/"
+save_results_to = current_directory + results_dir
+if not os.path.exists(save_results_to):
+    os.makedirs(save_results_to)
+# ====================================
+# Data Gen
+# ====================================
 
-        self.modes1 = modes1
-        self.modes2 = modes2
+class Sumudu_Transform(nn.Module):
+    def __init__(self, in_channels, out_channels, degree, width, s):
+        super(Sumudu_Transform, self).__init__()
+        
+        self.degree = degree
+        self.width = width
+        self.s = s
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+
+
+        self.flip = (-1)**torch.randint(0,2,(in_channels, out_channels))
         self.scale = (1 / (in_channels*out_channels))
-        self.weights_pole1 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1,  dtype=torch.cfloat))
-        self.weights_pole2 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes2, dtype=torch.cfloat))
-        self.weights_residue = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1,  self.modes2, dtype=torch.cfloat))
-    
-    def output_PR(self, lambda1, lambda2, alpha, weights_pole1, weights_pole2, weights_residue):
-        Hw=torch.zeros(weights_residue.shape[0],weights_residue.shape[0],weights_residue.shape[2],weights_residue.shape[3],lambda1.shape[0], lambda2.shape[0], device=alpha.device, dtype=torch.cfloat)
-        term1=torch.div(1,torch.einsum("pbix,qbik->pqbixk",torch.sub(lambda1,weights_pole1),torch.sub(lambda2,weights_pole2)))
-        Hw=torch.einsum("bixk,pqbixk->pqbixk",weights_residue,term1)
-        Pk=Hw  # for ode, Pk=-Hw; for 2d pde, Pk=Hw; for 3d pde, Pk=-Hw; 
-        output_residue1=torch.einsum("biox,oxikpq->bkox", alpha, Hw) 
-        output_residue2=torch.einsum("biox,oxikpq->bkpq", alpha, Pk) 
-        return output_residue1,output_residue2
+        self.weight1 = nn.Parameter((self.scale*torch.rand((in_channels, out_channels), dtype=torch.float64)))
+        self.weight2 = nn.Parameter((self.scale*torch.rand((in_channels, out_channels), dtype=torch.float64)))
 
+    def coefficient_training(self, input, degree):
+        output = input.reshape(input.shape[0]*input.shape[1]*input.shape[2], input.shape[3]).permute(1,0)
+        output = torch.from_numpy(np.polyfit(np.linspace(0, (s-1)*.02, s, dtype=np.float64), output.detach().cpu().numpy(), degree-1)).to('cuda').float().permute(1,0)
+        output = output.reshape(input.shape[0], input.shape[1], input.shape[2], degree)    
+        
+
+        return output
+    def transform(self, input):
+        fact = torch.from_numpy(sp.factorial(np.linspace(0, input.shape[3]-1, input.shape[3], dtype=np.float64))).to('cuda').flip((0,))
+        output = torch.mul(input, fact)
+        return output
+    def inverse_transform(self, input):
+        ##input = input.reshape(-1, input.shape[1]*input.shape[2]).detach().cpu().numpy()
+        ##output = np.zeros((input.shape[0], s*width), dtype= np.double)
+        ##for i in range(input.shape[0]):
+        ##    output[i, :] = chebyshev.cheby_idct(input[i,:])
+        ##factorial = torch.from_numpy(sp.factorial(np.linspace(0,s*width-1, s*width, dtype= np.double))).to('cuda').double()
+        ##output = torch.from_numpy(output).to('cuda').double()
+        ##output = torch.mul(output, factorial)
+        ##output = ifct(input)
+        fact = torch.from_numpy(sp.factorial(np.linspace(0, input.shape[3]-1, input.shape[3], dtype=np.float64))).to('cuda').flip((0,))
+        output = torch.div(input, fact)
+        return output
+
+    def approximate_sum(self, width, input):
+        '''discretization = torch.linspace(0, (s)*.01, steps = s, dtype=torch.float, device=input.device)
+        row_powers = torch.linspace(1, input.shape[2], steps = input.shape[2], dtype=torch.float, device=input.device).unsqueeze(1)
+        discretization = discretization**row_powers
+        output = torch.einsum("aid,dx->aix", input, discretization)
+        output = output.reshape(input.shape[0], s, width)
+        output = output.permute(0,2,1)
+        output = torch.zeros((input.shape[0], width, s), dtype= torch.float, device=input.device)
+        for i in range(input.shape[0]):
+            for j in range(width):
+                output[i,j,:] = torch.from_numpy(chebyshev.cheby_sum(np.linspace(0, (s-1)*.01, s, dtype=float),input[i,j,:].detach().cpu().numpy(), 0,((s-1)*.01))).to('cuda').float()
+'''     
+        x = np.linspace(0, (s-1)*.02, s, dtype=np.float64)
+        output = torch.zeros(input.shape[0], input.shape[1], input.shape[2], s, dtype= torch.float64, device=input.device)
+        for i in range(input.shape[0]):
+            for k in range(input.shape[1]):
+                for n in range(input.shape[2]):
+                    output[i,k,n,:] = torch.from_numpy(np.polyval(input[i,k,n,:].detach().cpu().numpy(), x))
+        return output
+
+
+    def weight_mul(self, input):
+        transformed = torch.zeros_like(input, device= input.device)
+        for i in range(input.shape[3]):
+            transformed[:,:,:,i] = torch.einsum("bix,io -> box", input[:,:,:,i], self.weight1)
+        for i in range(input.shape[2]):
+            transformed[:,:,i,:] += transformed[:,:,i,:]*torch.einsum("bit,io->bot", input[:,:,i,:], self.weight2)        
+        
+        return transformed
     def forward(self, x):
-        tx=T.cuda()
-        ty=X.cuda()
-        #Compute input poles and resudes by FFT
-        dty=(ty[0,1]-ty[0,0]).item()  # location interval
-        dtx=(tx[0,1]-tx[0,0]).item()  # time interval
-        alpha = torch.fft.fft2(x, dim=[-2,-1])
-        omega1=torch.fft.fftfreq(ty.shape[1], dty)*2*np.pi*1j   # location frequency
-        omega2=torch.fft.fftfreq(tx.shape[1], dtx)*2*np.pi*1j   # time frequency
-        omega1=omega1.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-        omega2=omega2.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-        lambda1=omega1.cuda()
-        lambda2=omega2.cuda()
- 
-        # Obtain output poles and residues for transient part and steady-state part
-        output_residue1,output_residue2 = self.output_PR(lambda1, lambda2, alpha, self.weights_pole1, self.weights_pole2, self.weights_residue)
+        x = self.coefficient_training(x, self.degree)
+        x = self.transform(x)
+        x = self.approximate_sum(self.width, x)
+        x = self.weight_mul(x)
+        x = self.coefficient_training(x, self.degree)
+        x = self.inverse_transform(x)
 
-        # Obtain time histories of transient response and steady-state response
-        x1 = torch.fft.ifft2(output_residue1, s=(x.size(-2), x.size(-1)))
-        x1 = torch.real(x1)    
-        term1=torch.einsum("bip,kz->bipz", self.weights_pole1, ty.type(torch.complex64).reshape(1,-1))
-        term2=torch.einsum("biq,kx->biqx", self.weights_pole2, tx.type(torch.complex64).reshape(1,-1))
-        term3=torch.einsum("bipz,biqx->bipqzx", torch.exp(term1),torch.exp(term2))
-        x2=torch.einsum("kbpq,bipqzx->kizx", output_residue2,term3)
-        x2=torch.real(x2)
-        x2=x2/x.size(-1)/x.size(-2)
-        return x1+x2
 
-class LNO2d(nn.Module):
-    def __init__(self, width,modes1,modes2):
-        super(LNO2d, self).__init__()
+        x = self.approximate_sum(self.width, x).float()
+
+
+        return x
+
+
+class SNO2d(nn.Module):
+    def __init__(self, width, s):
+        super(SNO2d, self).__init__()
 
         self.width = width
-        self.modes1 = modes1
-        self.modes2 = modes2
         self.fc0 = nn.Linear(3, self.width) 
 
-        self.conv0 = PR2d(self.width, self.width, self.modes1, self.modes2)
+        self.conv0 = Sumudu_Transform(self.width, self.width, degree, self.width, s)
         self.w0 = nn.Conv2d(self.width, self.width, 1)
+        self.w1 = nn.Conv2d(self.width, self.width, 1)
         self.norm = nn.InstanceNorm2d(self.width)
 
         self.fc1 = nn.Linear(self.width, 128)
@@ -101,6 +173,10 @@ class LNO2d(nn.Module):
         x1 = self.norm(self.conv0(self.norm(x)))
         x2 = self.w0(x)
         x = x1 +x2
+        x = F.leaky_relu(x)
+        x1 = self.norm(self.conv0(self.norm(x)))
+        x2 = self.w1(x)
+        x = x1+x2
 
         x = x.permute(0, 2, 3, 1)
         x = self.fc1(x)
@@ -108,17 +184,19 @@ class LNO2d(nn.Module):
         x = self.fc2(x)
         return x
 
+
+  
     def get_grid(self, shape, device):
-        batchsize, size_x, size_y = shape[0], shape[1], shape[2]
-        gridx = torch.tensor(np.linspace(0, 1, size_x), dtype=torch.float)
-        gridx = gridx.reshape(1, size_x, 1, 1).repeat([batchsize, 1, size_y, 1])
-        gridy = torch.tensor(np.linspace(0, 1, size_y), dtype=torch.float)
-        gridy = gridy.reshape(1, 1, size_y, 1).repeat([batchsize, size_x, 1, 1])
-        return torch.cat((gridx, gridy), dim=-1).to(device)
+        batchsize, size_x = shape[0], shape[1]
+        gridx = torch.tensor(np.linspace(0, 1, size_x), dtype=torch.cfloat)
+        gridx = gridx.reshape(1, size_x, 1).repeat([batchsize, 1, 1])
+        return gridx.to(device)
 
 # ====================================
 #  Define parameters and Load data
 # ====================================
+degree = 15
+s = 50
 ntrain = 200
 nvali = 50
 ntest=130
@@ -136,7 +214,7 @@ modes1 = 4
 modes2 = 4   
 width = 16
 
-reader = MatReader('Data/data.mat')
+reader = MatReader(r'C:\Users\benze\Downloads\SNO main\Beam_SNO\Data\data.beam.mat')
 x_train = reader.read_field('f_train')
 y_train = reader.read_field('u_train')
 T = reader.read_field('t')
@@ -152,10 +230,10 @@ x_train = x_train.reshape(ntrain,x_train.shape[1],x_train.shape[2],1)
 x_vali = x_vali.reshape(nvali,x_vali.shape[1],x_vali.shape[2],1)
 x_test = x_test.reshape(ntest,x_test.shape[1],x_test.shape[2],1)
 
-train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size_train, shuffle=True)
-vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=True)
+train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size_train, shuffle=False)
+vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=False)
 # model
-model = LNO2d(width,modes1, modes2).cuda()
+model = SNO2d(width, s).cuda()
 
 # ====================================
 # Training 
