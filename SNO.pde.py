@@ -150,7 +150,7 @@ class Sumudu_Transform(nn.Module):
 
 class SNO2d(nn.Module):
     def __init__(self, width):
-        super(LNO2d, self).__init__()
+        super(SNO2d, self).__init__()
 
         self.width = width
         self.fc0 = nn.Linear(3, self.width) 
@@ -399,4 +399,5 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
 
