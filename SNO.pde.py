@@ -238,9 +238,8 @@ model = SNO2d(width, s).cuda()
 # ====================================
 # Training 
 # ====================================
-torch.autograd.set_detect_anomaly(True)
 optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
 start_time = time.time()
 myloss = LpLoss(size_average=True)
 
@@ -256,12 +255,13 @@ for ep in range(epochs):
     n_train=0
     for x, y in train_loader:
         x, y = x.cuda(), y.cuda()
-        t=grid_x_train.cuda()
+
         optimizer.zero_grad()
         out = model(x)   
         mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
-        l2 = myloss(out.view(batch_size_train, -1), y.view(batch_size_train, -1))
+        l2 = myloss(out.view(-1,x_train.shape[1],x_train.shape[2]), y)
         l2.backward()
+
         optimizer.step()
         train_mse += mse.item()
         train_l2 += l2.item()
@@ -275,10 +275,9 @@ for ep in range(epochs):
         n_vali=0
         for x, y in vali_loader:
             x, y = x.cuda(), y.cuda()
-            t=grid_x_vali.cuda()
             out = model(x)
-            mse=F.mse_loss(out.view(batch_size_vali, -1), y.view(batch_size_vali, -1), reduction='mean')
-            vali_l2 += myloss(out.view(batch_size_vali, -1), y.view(batch_size_vali, -1)).item()
+            mse=F.mse_loss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y, reduction='mean')
+            vali_l2 += myloss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y).item()
             vali_mse += mse.item()
             n_vali += 1
 
@@ -301,6 +300,16 @@ print("=============================\n")
 # ====================================
 # saving settings
 # ====================================
+current_directory = os.getcwd()
+case = "Case_Beam_"
+save_index = 1  
+folder_index = str(save_index)
+
+results_dir = "/" + case + folder_index +"/"
+save_results_to = current_directory + results_dir
+if not os.path.exists(save_results_to):
+    os.makedirs(save_results_to)
+
 x = np.linspace(0, epochs-1, epochs)
 np.savetxt(save_results_to+'/epoch.txt', x)
 np.savetxt(save_results_to+'/train_loss.txt', train_loss)
@@ -316,29 +325,25 @@ torch.save(model, save_models_to+'Wave_states')
 # ====================================
 # testing
 # ====================================
-pred = torch.zeros(y_test.shape)
+test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_test, y_test), batch_size=1, shuffle=False)
+pred_u = torch.zeros(ntest,y_test.shape[1],y_test.shape[2])
 index = 0
 test_l2 = 0.0
-test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_test, y_test),
-                                          batch_size=1, shuffle=False)
-
 with torch.no_grad():
     for x, y in test_loader:
         x, y = x.cuda(), y.cuda()
-        t=grid_x_test.cuda()
-        out = model(x).view(1,-1)
-        pred[index]= out
-        test_l2 += myloss(out, y).item()
+        out = model(x)
+        test_l2 += myloss(out.view(-1,x_test.shape[1],x_test.shape[2]), y).item()
+        pred_u[index,:,:] = out.view(-1,x_test.shape[1],x_test.shape[2])
         index = index + 1
-test_l2/=index
-
+test_l2 /= index
 scipy.io.savemat(save_results_to+'wave_states_test.mat', 
-                     mdict={'test_err': test_l2,
-                            'x_test': grid_x_train.numpy(),
+                     mdict={ 'test_err': test_l2,
+                            'T': T.numpy(),
+                            'X': X.numpy(),
                             'y_test': y_test.numpy(), 
-                            'y_pred': pred.cpu().numpy()})  
+                            'y_pred': pred_u.cpu().numpy()})  
     
-        
     
 print("\n=============================")
 print('Testing error: %.3e'%(test_l2))
@@ -358,3 +363,4 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+plt.show()
