@@ -1,13 +1,15 @@
 # SNO
 The Code Repository of the Sumudu Neural Operator
 
-# LNO Replication
-This is a replication of the LNO code found here: https://github.com/qianyingcao/Laplace-Neural-Operator/. There are minor structural changes, but it is mostly the original code.
+Listed here are the Sumudu Neural Operator implementations for 1D and 2D differential equations. We use the LNO Data files to compare consistent data. The files labeled "ode" and "pde" are the original implementations, while the files ending in "Re" are the optimized versions used to run our tests.
 
-Things to note: the file paths may differ depending on your application, so make sure they are accurate. Some of the Data folders have fillers; the real data can be found here: https://drive.google.com/drive/folders/1x8EYALKl2l9lxpMVy6rfj934kno4V0qB?usp=sharing. GitHub doesn't allow files over 25 mb.
+# LNO Replication
+This is a replication of the LNO code, which can be found here: https://github.com/qianyingcao/Laplace-Neural-Operator/. There are minor structural changes, but the code remains largely unchanged.
+
+Note: The file paths may vary depending on your application, so ensure they are accurate. Some of the Data folders have fillers; the real data can be found here: https://drive.google.com/drive/folders/1x8EYALKl2l9lxpMVy6rfj934kno4V0qB?usp=sharing. GitHub doesn't allow files over 25 mb.
 
 # FNO Replication
-This is a replication of the LNO code found here: https://github.com/ixScience/fourier_neural_operator/. There are minor updates to the saving settings to keep them consistent with LNO and SNO. Some parts have also been updated to use a GPU device instead of a CPU.
+This is a replication of the FNO code found here: https://github.com/ixScience/fourier_neural_operator/. There are minor updates to the saving settings to maintain consistency with LNO and SNO. We have also changed the 4-layer structure to a 1-layer Fourier Layer to maintain consistency with parameters and layers. 
 
-Things to note: the file paths may differ depending on your application, so make sure they are accurate. The data file can be found here: https://drive.google.com/drive/folders/1UnbQh2WWc6knEHbLn-ZaXrKUZhp7pjt-.
-Burger_R10.zip contains the data for 1d. Darcy_421.zip contains the data for 2d. NavierStokes_V1e-3_N5000_T50.zip contains the files for 2d time and 3d.
+Note: The file paths may vary depending on your application, so ensure they are accurate. The data file can be found here: https://drive.google.com/drive/folders/1UnbQh2WWc6knEHbLn-ZaXrKUZhp7pjt-.
+Although the FNO paper used specific data files, we have opted to use LNO's data files for all our operators.
