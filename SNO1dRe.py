@@ -88,7 +88,7 @@ class Sumudu_Transform(nn.Module):
     def approximate_sum(self, width, input):
         B, C, degree = input.shape
         # Discretize [0,1] domain
-        x_lin = torch.linspace(0, self.s*0.02, self.s, dtype=torch.float64, device=self.device)  # [s]
+        x_lin = torch.linspace(0, 1, self.s, dtype=torch.float64, device=self.device)  # [s]
         powers = torch.arange(degree-1, -1, -1, dtype=torch.float64, device=self.device)  # [degree]
 
         # x_lin^powers -> [s, degree]
@@ -342,3 +342,4 @@ class main():
         fig.savefig(save_results_to+'loss_history.png')
         return float(best_val)
 main(degree=15).train()
+
