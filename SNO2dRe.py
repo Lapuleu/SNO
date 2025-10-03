@@ -74,9 +74,6 @@ class Sumudu_Transform(nn.Module):
         return input / self.factorial[:input.shape[3]]
 
     def approximate_sum(self, width, input):
-        """
-        Evaluate polynomial each call using a fresh Vandermonde.
-        """
         B, N, M, D = input.shape
         V = torch.vander(self.x_grid, N=D, increasing=False)   # [s, degree]
         return torch.einsum('b n m d, s d -> b n m s', input, V)
@@ -132,182 +129,157 @@ class SNO2d(nn.Module):
 # ====================================
 #  Define parameters and Load data
 # ====================================
+s = 50
+ntrain = 200
+nvali = 50
+ntest=130
 
-class main():
-    def __init__(self, degree):
-        self.degree = degree
+batch_size_train = 50
+batch_size_vali = 50
 
-    def train(self):
-        s = 50
-        ntrain = 200
-        nvali = 50
-        ntest=130
+learning_rate = 0.002
 
-        batch_size_train = 50
-        batch_size_vali = 50
+epochs = 1000
+step_size = 100
+gamma = 0.5
+width = 16
+degree = 4
 
-        learning_rate = 0.002
+reader = MatReader('/workspace/gridSearch/Data/Beam/data.mat')
+x_train = reader.read_field('f_train')
+y_train = reader.read_field('u_train')
+T = reader.read_field('t')
+X = reader.read_field('x')
 
-        epochs = 1000
-        step_size = 100
-        gamma = 0.5
+x_vali = reader.read_field('f_vali')
+y_vali = reader.read_field('u_vali')
 
-        modes1 = 4  
-        modes2 = 4   
-        width = 16
+x_test = reader.read_field('f_test')
+y_test = reader.read_field('u_test')
 
-        reader = MatReader('/workspace/gridSearch/Data/Beam/data.mat')
-        x_train = reader.read_field('f_train')
-        y_train = reader.read_field('u_train')
-        T = reader.read_field('t')
-        X = reader.read_field('x')
+x_train = x_train.reshape(ntrain,x_train.shape[1],x_train.shape[2],1)
+x_vali = x_vali.reshape(nvali,x_vali.shape[1],x_vali.shape[2],1)
+x_test = x_test.reshape(ntest,x_test.shape[1],x_test.shape[2],1)
 
-        x_vali = reader.read_field('f_vali')
-        y_vali = reader.read_field('u_vali')
+train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size_train, shuffle=False)
+vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=False)
 
-        x_test = reader.read_field('f_test')
-        y_test = reader.read_field('u_test')
+# model
+model = SNO2d(degree, width,s).to(device)
 
-        x_train = x_train.reshape(ntrain,x_train.shape[1],x_train.shape[2],1)
-        x_vali = x_vali.reshape(nvali,x_vali.shape[1],x_vali.shape[2],1)
-        x_test = x_test.reshape(ntest,x_test.shape[1],x_test.shape[2],1)
+# ====================================
+# Training 
+# ====================================
+optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+start_time = time.time()
+myloss = LpLoss(size_average=True)
 
-        train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size_train, shuffle=False)
-        vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=False)
+train_error = np.zeros((epochs, 1))
+train_loss = np.zeros((epochs, 1))
+vali_error = np.zeros((epochs, 1))
+vali_loss = np.zeros((epochs, 1))
+for ep in range(epochs):
+    model.train()
+    t1 = default_timer()
+    train_mse = 0
+    train_l2 = 0
+    n_train=0
+    for x, y in train_loader:
+        x, y = x.cuda(), y.cuda()
 
-        # model
-        model = SNO2d(self.degree, width,s).to(device)
-        best_val = float("inf")
-        patience = 2000   # stop after 20 epochs without improvement
-        counter = 0
+        optimizer.zero_grad()
+        out = model(x)   
+        mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
+        l2 = myloss(out.view(-1,x_train.shape[1],x_train.shape[2]), y)
+        l2.backward()
 
-        # ====================================
-        # Training 
-        # ====================================
-        optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-        start_time = time.time()
-        myloss = LpLoss(size_average=True)
+        optimizer.step()
+        train_mse += mse.item()
+        train_l2 += l2.item()
+        n_train += 1
 
-        best_val = float("inf")
-        counter = 0
-        patience = 2000   # stop after 200 epochs without improvement
+    scheduler.step()
+    model.eval()
+    vali_mse = 0.0
+    vali_l2 = 0.0
+    with torch.no_grad():
+        n_vali=0
+        for x, y in vali_loader:
+            x, y = x.cuda(), y.cuda()
+            out = model(x)
+            mse=F.mse_loss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y, reduction='mean')
+            vali_l2 += myloss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y).item()
+            vali_mse += mse.item()
+            n_vali += 1
 
-        train_error = np.zeros((epochs, 1))
-        train_loss = np.zeros((epochs, 1))
-        vali_error = np.zeros((epochs, 1))
-        vali_loss = np.zeros((epochs, 1))
-        for ep in range(epochs):
-            model.train()
-            t1 = default_timer()
-            train_mse = 0
-            train_l2 = 0
-            n_train=0
-            for x, y in train_loader:
-                x, y = x.cuda(), y.cuda()
+    train_mse /= n_train
+    vali_mse /= n_vali
+    train_l2 /= n_train
+    vali_l2 /= n_vali
+    train_error[ep,0] = train_l2
+    vali_error[ep,0] = vali_l2
+    train_loss[ep,0] = train_mse
+    vali_loss[ep,0] = vali_mse
+    t2 = default_timer()
+    print("Epoch: %d, time: %.3f, Train Loss: %.3e,Vali Loss: %.3e, Train l2: %.4f, Vali l2: %.4f" % (ep, t2-t1, train_mse, vali_mse,train_l2, vali_l2))
+elapsed = time.time() - start_time
+print("\n=============================")
+print("Training done...")
+print('Training time: %.3f'%(elapsed))
+print("=============================\n")
 
-                optimizer.zero_grad()
-                out = model(x)   
-                mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
-                l2 = myloss(out.view(-1,x_train.shape[1],x_train.shape[2]), y)
-                l2.backward()
+x = np.linspace(0, epochs-1, epochs)
+np.savetxt(save_results_to+'/epoch.txt', x)
+np.savetxt(save_results_to+'/train_loss.txt', train_loss)
+np.savetxt(save_results_to+'/vali_loss.txt', vali_loss)
+np.savetxt(save_results_to+'/train_error.txt', train_error)
+np.savetxt(save_results_to+'/vali_error.txt', vali_error)    
+save_models_to = save_results_to +"model/"
+if not os.path.exists(save_models_to):
+    os.makedirs(save_models_to)
+    
+torch.save(model, save_models_to+'Wave_states')
 
-                optimizer.step()
-                train_mse += mse.item()
-                train_l2 += l2.item()
-                n_train += 1
-
-            scheduler.step()
-            model.eval()
-            vali_mse = 0.0
-            vali_l2 = 0.0
-            with torch.no_grad():
-                n_vali=0
-                for x, y in vali_loader:
-                    x, y = x.cuda(), y.cuda()
-                    out = model(x)
-                    mse=F.mse_loss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y, reduction='mean')
-                    vali_l2 += myloss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y).item()
-                    vali_mse += mse.item()
-                    n_vali += 1
-
-            train_mse /= n_train
-            vali_mse /= n_vali
-            train_l2 /= n_train
-            vali_l2 /= n_vali
-            train_error[ep,0] = train_l2
-            vali_error[ep,0] = vali_l2
-            train_loss[ep,0] = train_mse
-            vali_loss[ep,0] = vali_mse
-            if vali_l2 < best_val:
-                best_val = vali_l2
-                counter = 0
-            else:
-                counter += 1
-                if counter >= patience:
-                    print(f"Early stopping at epoch {ep}")
-                    break
-            t2 = default_timer()
-            print("Epoch: %d, time: %.3f, Train Loss: %.3e,Vali Loss: %.3e, Train l2: %.4f, Vali l2: %.4f" % (ep, t2-t1, train_mse, vali_mse,train_l2, vali_l2))
-        elapsed = time.time() - start_time
-        print("\n=============================")
-        print("Training done...")
-        print('Training time: %.3f'%(elapsed))
-        print("=============================\n")
-
-        x = np.linspace(0, epochs-1, epochs)
-        np.savetxt(save_results_to+'/epoch.txt', x)
-        np.savetxt(save_results_to+'/train_loss.txt', train_loss)
-        np.savetxt(save_results_to+'/vali_loss.txt', vali_loss)
-        np.savetxt(save_results_to+'/train_error.txt', train_error)
-        np.savetxt(save_results_to+'/vali_error.txt', vali_error)    
-        save_models_to = save_results_to +"model/"
-        if not os.path.exists(save_models_to):
-            os.makedirs(save_models_to)
-            
-        torch.save(model, save_models_to+'Wave_states')
-
-        # ====================================
-        # testing
-        # ====================================
-        test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_test, y_test), batch_size=1, shuffle=False)
-        pred_u = torch.zeros(ntest,y_test.shape[1],y_test.shape[2])
-        index = 0
-        test_l2 = 0.0
-        with torch.no_grad():
-            for x, y in test_loader:
-                x, y = x.cuda(), y.cuda()
-                out = model(x)
-                test_l2 += myloss(out.view(-1,x_test.shape[1],x_test.shape[2]), y).item()
-                pred_u[index,:,:] = out.view(-1,x_test.shape[1],x_test.shape[2])
-                index = index + 1
-        test_l2 /= index
-        scipy.io.savemat(save_results_to+'wave_states_test.mat', 
-                            mdict={ 'test_err': test_l2,
-                                    'T': T.numpy(),
-                                    'X': X.numpy(),
-                                    'y_test': y_test.numpy(), 
-                                    'y_pred': pred_u.cpu().numpy()})  
-            
-            
-        print("\n=============================")
-        print('Testing error: %.3e'%(test_l2))
-        print("=============================\n")
+# ====================================
+# testing
+# ====================================
+test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_test, y_test), batch_size=1, shuffle=False)
+pred_u = torch.zeros(ntest,y_test.shape[1],y_test.shape[2])
+index = 0
+test_l2 = 0.0
+with torch.no_grad():
+    for x, y in test_loader:
+        x, y = x.cuda(), y.cuda()
+        out = model(x)
+        test_l2 += myloss(out.view(-1,x_test.shape[1],x_test.shape[2]), y).item()
+        pred_u[index,:,:] = out.view(-1,x_test.shape[1],x_test.shape[2])
+        index = index + 1
+test_l2 /= index
+scipy.io.savemat(save_results_to+'wave_states_test.mat', 
+                    mdict={ 'test_err': test_l2,
+                            'T': T.numpy(),
+                            'X': X.numpy(),
+                            'y_test': y_test.numpy(), 
+                            'y_pred': pred_u.cpu().numpy()})  
+    
+    
+print("\n=============================")
+print('Testing error: %.3e'%(test_l2))
+print("=============================\n")
 
 
-        # Plotting the loss history
-        num_epoch = epochs
-        epoch = np.linspace(1, num_epoch, num_epoch)
-        fig = plt.figure(constrained_layout=False, figsize=(7, 7))
-        gs = fig.add_gridspec(1, 1)
-        ax = fig.add_subplot(gs[0])
-        ax.plot(epoch, train_loss[:,0], color='blue', label='Train Loss')
-        ax.plot(epoch, vali_loss[:,0], color='red', label='Validation Loss')
-        ax.set_yscale('log')
-        ax.set_ylabel('Loss')
-        ax.set_xlabel('Epochs')
-        ax.legend(loc='upper left')
-        fig.savefig(save_results_to+'loss_history.png')
-        plt.show()
-        return float(best_val)
-main(degree=4).train()
+# Plotting the loss history
+num_epoch = epochs
+epoch = np.linspace(1, num_epoch, num_epoch)
+fig = plt.figure(constrained_layout=False, figsize=(7, 7))
+gs = fig.add_gridspec(1, 1)
+ax = fig.add_subplot(gs[0])
+ax.plot(epoch, train_loss[:,0], color='blue', label='Train Loss')
+ax.plot(epoch, vali_loss[:,0], color='red', label='Validation Loss')
+ax.set_yscale('log')
+ax.set_ylabel('Loss')
+ax.set_xlabel('Epochs')
+ax.legend(loc='upper left')
+fig.savefig(save_results_to+'loss_history.png')
+plt.show()
