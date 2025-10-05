@@ -54,10 +54,6 @@ class Sumudu_Transform(nn.Module):
         self.scale = 1.0 / (in_channels * out_channels)
         self.weight1 = nn.Parameter(self.scale * torch.rand((in_channels, out_channels), dtype=torch.float64, device=device))
 
-        # Precompute factorials once (float64, GPU)
-        fact_np = sp.factorial(np.arange(0, s, dtype=np.float64))
-        self.register_buffer('fact', torch.tensor(fact_np[::-1].copy(), dtype=torch.float64, device=device))
-
     def coefficient_training(self, input, degree):
         B, C, D = input.shape
         input = input.double() 
@@ -311,6 +307,7 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
 
 
 
