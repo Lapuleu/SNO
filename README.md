@@ -3,7 +3,9 @@ The Code Repository of the Sumudu Neural Operator
 
 Listed here are the Sumudu Neural Operator implementations for 1D and 2D differential equations. We use the LNO Data files to compare consistent data. The files labeled "ode" and "pde" are the original implementations, while the files ending in "Re" are the optimized versions used to run our tests.
 
-All ran results are in the Results folder along with any graphs
+All run results are stored in the Results folder, along with any generated graphs.
+
+Note for SNO3dRe: It uses the same utilities3 and Adam file as in the LNO 3d Brusselator.
 
 # LNO Replication
 This is a replication of the LNO code, which can be found here: https://github.com/qianyingcao/Laplace-Neural-Operator/. There are minor structural changes, but the code remains largely unchanged.
@@ -15,3 +17,5 @@ This is a replication of the FNO code found here: https://github.com/ixScience/f
 
 Note: The file paths may vary depending on your application, so ensure they are accurate. The data file can be found here: https://drive.google.com/drive/folders/1UnbQh2WWc6knEHbLn-ZaXrKUZhp7pjt-.
 Although the FNO paper used specific data files, we have opted to use LNO's data files for all our operators.
+
+Note for FNO3d: It uses the same utilities3 and Adam file as in the LNO 3d Brusselator.
