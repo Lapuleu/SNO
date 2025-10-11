@@ -212,7 +212,7 @@ vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_test,
 
 device = torch.device('cuda') 
 # model
-model = LNO3d(width,modes1, modes2,modes3).cuda()
+model = SimpleBlock2d(width,modes1, modes2,modes3).cuda()
 
 
 # ====================================
