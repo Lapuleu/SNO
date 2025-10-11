@@ -160,7 +160,7 @@ x_test = x_test.reshape(ntest,x_test.shape[1],x_test.shape[2],1)
 train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size_train, shuffle=False)
 vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=False)
 # model
-model = FNO2d(width, s).cuda()
+model = SimpleBlock2d(width, s).cuda()
 
 # ====================================
 # Training 
