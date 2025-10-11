@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from functools import reduce
 from timeit import default_timer
+from Adam import Adam
 from utilities3 import *  # your existing helper utilities
 import os
 import time
@@ -118,74 +119,56 @@ class Net2d(nn.Module):
     def count_params(self):
         return sum(p.numel() for p in self.parameters())
 
-################################################################
-# data / training config
-################################################################
-TRAIN_PATH = '/content/drive/MyDrive/LNORep/2D_Beam/Data/data.mat'
-TEST_PATH  = '/content/drive/MyDrive/LNORep/2D_Beam/Data/data.mat'
+# ====================================
+#  Define parameters and Load data
+# ====================================
+degree = 9
+s = 50
+ntrain = 200
+nvali = 50
+ntest=130
 
-ntrain, ntest = 200, 130
-batch_size    = 20
-learning_rate = 0.001
-epochs        = 1000
-step_size     = 100
-gamma         = 0.5
-modes, width  = 12, 32
-s             = 50   # spatial resolution
+batch_size_train = 50
+batch_size_vali = 50
 
-################################################################
-# load data
-################################################################
-reader = MatReader(TRAIN_PATH)
+learning_rate = 0.002
+
+epochs = 1000
+step_size = 100
+gamma = 0.5
+
+modes1 = 4  
+modes2 = 4   
+width = 16
+
+reader = MatReader(r'C:\Users\benze\Downloads\SNO main\Beam_SNO\Data\data.beam.mat')
 x_train = reader.read_field('f_train')
 y_train = reader.read_field('u_train')
 T = reader.read_field('t')
 X = reader.read_field('x')
 
-reader.load_file(TEST_PATH)
+x_vali = reader.read_field('f_vali')
+y_vali = reader.read_field('u_vali')
+
 x_test = reader.read_field('f_test')
 y_test = reader.read_field('u_test')
 
-x_normalizer = UnitGaussianNormalizer(x_train)
-x_train = x_normalizer.encode(x_train)
-x_test  = x_normalizer.encode(x_test)
+x_train = x_train.reshape(ntrain,x_train.shape[1],x_train.shape[2],1)
+x_vali = x_vali.reshape(nvali,x_vali.shape[1],x_vali.shape[2],1)
+x_test = x_test.reshape(ntest,x_test.shape[1],x_test.shape[2],1)
 
-y_normalizer = UnitGaussianNormalizer(y_train)
-y_train = y_normalizer.encode(y_train)
+train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size_train, shuffle=False)
+vali_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_vali, y_vali), batch_size=batch_size_vali, shuffle=False)
+# model
+model = SNO2d(width, s).cuda()
 
-# add coordinates
-gridx = np.linspace(0, 1, s)
-gridy = np.linspace(0, 1, s)
-grid  = np.stack(np.meshgrid(gridx, gridy, indexing="ij"), axis=-1)  # (s,s,2)
-grid  = torch.tensor(grid, dtype=torch.float).unsqueeze(0)           # (1,s,s,2)
-
-x_train = torch.cat([x_train.reshape(ntrain, s, s, 1), grid.repeat(ntrain,1,1,1)], dim=3)
-x_test  = torch.cat([x_test.reshape(ntest, s, s, 1), grid.repeat(ntest,1,1,1)], dim=3)
-
-train_loader = torch.utils.data.DataLoader(
-    torch.utils.data.TensorDataset(x_train, y_train),
-    batch_size=batch_size, shuffle=True)
-test_loader  = torch.utils.data.DataLoader(
-    torch.utils.data.TensorDataset(x_test, y_test),
-    batch_size=batch_size, shuffle=False)
-
-################################################################
-# training
-################################################################
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-x_normalizer.mean = x_normalizer.mean.to(device)
-x_normalizer.std  = x_normalizer.std.to(device)
-
-y_normalizer.mean = y_normalizer.mean.to(device)
-y_normalizer.std  = y_normalizer.std.to(device)
-
-model = Net2d(modes, width).to(device)
-print("Parameter count:", model.count_params())
-
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+# ====================================
+# Training 
+# ====================================
+optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-loss_fn   = LpLoss(size_average=False)
 start_time = time.time()
+myloss = LpLoss(size_average=True)
 
 train_error = np.zeros((epochs, 1))
 train_loss = np.zeros((epochs, 1))
@@ -196,43 +179,34 @@ for ep in range(epochs):
     t1 = default_timer()
     train_mse = 0
     train_l2 = 0
-    train_ls = 0.0
-    n_train = 0
+    n_train=0
     for x, y in train_loader:
-        x, y = x.to(device), y.to(device)
+        x, y = x.cuda(), y.cuda()
 
         optimizer.zero_grad()
-        out = model(x)
-        out = y_normalizer.decode(out)
-        y   = y_normalizer.decode(y)
-        mse = F.mse_loss(out.view(batch_size, -1), y.view(batch_size, -1), reduction='mean')
-        loss = loss_fn(out.view(batch_size, -1), y.view(batch_size, -1))
-        loss.backward()
+        out = model(x)   
+        mse = F.mse_loss(out.view(batch_size_train, -1), y.view(batch_size_train, -1), reduction='mean')
+        l2 = myloss(out.view(-1,x_train.shape[1],x_train.shape[2]), y)
+        l2.backward()
+
         optimizer.step()
-        train_ls += loss.item()
         train_mse += mse.item()
-        train_l2 += loss.item()
+        train_l2 += l2.item()
         n_train += 1
 
     scheduler.step()
-    train_ls /= ntrain
-
-    # evaluation
     model.eval()
-    rel_err = 0.0
     vali_mse = 0.0
     vali_l2 = 0.0
     with torch.no_grad():
-        n_vali = 0
-        for x, y in test_loader:
-            x, y = x.to(device), y.to(device)
-            out  = y_normalizer.decode(model(x))
-            rel_err += loss_fn(out.view(batch_size,-1), y.view(batch_size,-1)).item()
-            mse=F.mse_loss(out.view(batch_size, -1), y.view(batch_size, -1), reduction='mean')
-            vali_l2 += loss_fn(out.view(batch_size, -1), y.view(batch_size, -1)).item()
+        n_vali=0
+        for x, y in vali_loader:
+            x, y = x.cuda(), y.cuda()
+            out = model(x)
+            mse=F.mse_loss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y, reduction='mean')
+            vali_l2 += myloss(out.view(-1,x_vali.shape[1],x_vali.shape[2]), y).item()
             vali_mse += mse.item()
             n_vali += 1
-    rel_err /= ntest
 
     train_mse /= n_train
     vali_mse /= n_vali
@@ -242,7 +216,6 @@ for ep in range(epochs):
     vali_error[ep,0] = vali_l2
     train_loss[ep,0] = train_mse
     vali_loss[ep,0] = vali_mse
-
     t2 = default_timer()
     print("Epoch: %d, time: %.3f, Train Loss: %.3e,Vali Loss: %.3e, Train l2: %.4f, Vali l2: %.4f" % (ep, t2-t1, train_mse, vali_mse,train_l2, vali_l2))
 elapsed = time.time() - start_time
@@ -254,6 +227,16 @@ print("=============================\n")
 # ====================================
 # saving settings
 # ====================================
+current_directory = os.getcwd()
+case = "Case_Beam_"
+save_index = 1  
+folder_index = str(save_index)
+
+results_dir = "/" + case + folder_index +"/"
+save_results_to = current_directory + results_dir
+if not os.path.exists(save_results_to):
+    os.makedirs(save_results_to)
+
 x = np.linspace(0, epochs-1, epochs)
 np.savetxt(save_results_to+'/epoch.txt', x)
 np.savetxt(save_results_to+'/train_loss.txt', train_loss)
@@ -277,7 +260,7 @@ with torch.no_grad():
     for x, y in test_loader:
         x, y = x.cuda(), y.cuda()
         out = model(x)
-        test_l2 += loss_fn(out.view(-1,x_test.shape[1],x_test.shape[2]), y).item()
+        test_l2 += myloss(out.view(-1,x_test.shape[1],x_test.shape[2]), y).item()
         pred_u[index,:,:] = out.view(-1,x_test.shape[1],x_test.shape[2])
         index = index + 1
 test_l2 /= index
