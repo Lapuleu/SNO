@@ -84,7 +84,7 @@ class Sumudu_Transform(nn.Module):
     def approximate_sum(self, width, input):
         B, C, degree = input.shape
         # Discretize [0,1] domain
-        x_lin = torch.linspace(0, s*.01, self.s, dtype=torch.float64, device=self.device)  # [s]
+        x_lin = torch.linspace(0, 1, self.s, dtype=torch.float64, device=self.device)  # [s]
         powers = torch.arange(degree-1, -1, -1, dtype=torch.float64, device=self.device)  # [degree]
 
         # x_lin^powers -> [s, degree]
@@ -161,7 +161,7 @@ learning_rate = .001
 width = 16
 degree = 4
 
-reader = MatReader('/workspace/gridSearch/Data/data.mat')
+reader = MatReader('C:\\Users\\benze\\Downloads\\SNO main\\SNO-main\\LNOReplication\\1D_Duffing_c0\\Data\\data.mat')
 x_train = reader.read_field('f_train')
 y_train = reader.read_field('u_train')
 grid_x_train = reader.read_field('x_train')
