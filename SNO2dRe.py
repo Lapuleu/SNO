@@ -61,7 +61,7 @@ class Sumudu_Transform(nn.Module):
         Fit polynomial coefficients each call using a fresh Vandermonde and pinv.
         """
         B, N, M, S = input.shape
-        x_lin = torch.linspace(0, (M-1)*.01, M, dtype=torch.float64)
+        x_lin = torch.linspace(0, (S-1)*.01, M, dtype=torch.float64)
         y = input.reshape(-1, S).double()           # [B*N*M, s]
         V = torch.vander(x_lin, N=degree, increasing=False)  # [s, degree]
         pinv = torch.linalg.pinv(V, rcond=1e-4)                      # [degree, s]
