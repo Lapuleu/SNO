@@ -52,8 +52,7 @@ class Sumudu_Transform(nn.Module):
         dtype = torch.float64
         x_grid = torch.linspace(0.0, 1.0, steps=s, dtype=dtype)  # [s]
         vander = torch.vander(x_grid, N=degree, increasing=False)  # [s, degree]
-        max_fact = max(s, degree)
-        idx = torch.arange(1, max_fact + 1, dtype=dtype)
+        idx = torch.arange(1, s + 1, dtype=dtype)
         fact = torch.exp(torch.lgamma(idx + 1.0))  # [max_fact]
         self.register_buffer('x_grid', x_grid)
         self.register_buffer('vander', vander)
@@ -307,4 +306,5 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
 
