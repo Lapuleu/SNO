@@ -35,88 +35,88 @@ if not os.path.exists(save_results_to):
 # Data Gen
 # ====================================
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import scipy.special as sp
-
 class Sumudu_Transform(nn.Module):
-    def __init__(self, in_channels, out_channels, degree, width, s, device=device):
-        super(Sumudu_Transform, self).__init__()
+    def __init__(self, in_channels, out_channels, degree, width, s, device=None):
+        super().__init__()
         self.degree = degree
         self.width = width
         self.s = s
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.device = device
 
-        self.flip = (-1)**torch.randint(0, 2, (in_channels, out_channels), device=device)
+        # learnable weights (use float64 for numerical stability)
         self.scale = 1.0 / (in_channels * out_channels)
-        self.weight1 = nn.Parameter(self.scale * torch.rand((in_channels, out_channels), dtype=torch.float64, device=device))
+        self.weight1 = nn.Parameter(self.scale * torch.rand((in_channels, out_channels), dtype=torch.float64))
+        self.flip = (-1) ** torch.randint(0, 2, (in_channels, out_channels))
 
-    def coefficient_training(self, input, degree):
+        dtype = torch.float64
+        x_grid = torch.linspace(0.0, 1.0, steps=s, dtype=dtype)  # [s]
+        vander = torch.vander(x_grid, N=degree, increasing=False)  # [s, degree]
+        max_fact = max(s, degree)
+        idx = torch.arange(1, max_fact + 1, dtype=dtype)
+        fact = torch.exp(torch.lgamma(idx + 1.0))  # [max_fact]
+        self.register_buffer('x_grid', x_grid)
+        self.register_buffer('vander', vander)
+        self.register_buffer('vander_pinv', vander_pinv)
+        self.register_buffer('factorial', fact)  # factorial[n-1] == n!
+
+    def coefficient_training(self, input):
+        """
+        Fit polynomial coefficients for each (batch, channel) using precomputed vander_pinv.
+        input: [B, C, D] where D is number of samples (must match self.s used to build vander)
+        returns: [B, C, degree]
+        """
         B, C, D = input.shape
-        input = input.double() 
-        x_lin = torch.linspace(0, 1, D, dtype=torch.float64, device=self.device)
-        powers = torch.arange(degree-1, -1, -1, dtype=torch.float64, device=self.device)  # highest power first
-
-        # Vandermonde matrix [D, degree]
-        vander = x_lin.unsqueeze(1) ** powers.unsqueeze(0)  # [D, degree]
-
-        # Solve least squares for all batches at once
-        input_flat = input.reshape(B*C, D).T  # [D, B*C]
-        coeffs = torch.linalg.lstsq(vander, input_flat).solution  # [degree, B*C]
-
-        coeffs = coeffs.T.reshape(B, C, degree)  # [B, C, degree]
-        return coeffs
+        y = input.reshape(-1, D).double()  # [B*C, D]
+        coef = (self.vander_pinv[:, :D] @ y.T).T
+        coef = coef.reshape(B, C, -1)  # [B, C, degree]
+        return coef
 
     def transform(self, input):
-        # Ensure factorial length matches input's last dimension
-        fact = torch.tensor(sp.factorial(np.arange(input.shape[2], dtype=np.float64)), 
-                            dtype=torch.float64, device=input.device)
-        return input.double() * fact.view(1, 1, -1)
+        """
+        Multiply coefficients by factorials (elementwise). Input shape [B, C, degree]
+        """
+        D = input.shape[2]
+        fact = self.factorial[:D].view(1, 1, -1)
+        return input.double() * fact
 
     def inverse_transform(self, input):
-        fact = torch.tensor(sp.factorial(np.arange(input.shape[2], dtype=np.float64)), 
-                            dtype=torch.float64, device=input.device)
-        return input.double() / fact.view(1, 1, -1)
+        D = input.shape[2]
+        fact = self.factorial[:D].view(1, 1, -1)
+        return input.double() / fact
 
     def approximate_sum(self, width, input):
         B, C, degree = input.shape
-        # Discretize [0,1] domain
-        x_lin = torch.linspace(0, 1, self.s, dtype=torch.float64, device=self.device)  # [s]
-        powers = torch.arange(degree-1, -1, -1, dtype=torch.float64, device=self.device)  # [degree]
+        V = self.vander[:, :degree]   # [s, degree]
+        out = input.reshape(-1, degree).double() @ V.T   # [B*C, s]
+        out = out.reshape(B, C, self.s)
+        return out
 
-        # x_lin^powers -> [s, degree]
-        x_pow = x_lin.unsqueeze(1) ** powers.unsqueeze(0)  # [s, degree]
-
-        # Multiply coefficients by x_pow
-        input_flat = input.reshape(B*C, degree)  # [B*C, degree]
-        output = input_flat @ x_pow.T  # [B*C, s]
-        output = output.reshape(B, C, self.s)
-        return output
-
-    def weight_mul(self, weight1, input):
-        return torch.einsum("bix,io->box", input, weight1.double())
+    def weight_mul(self, input):
+        return torch.einsum("b i x, i o -> b o x", input.double(), self.weight1)
 
     def forward(self, x):
-        x = self.coefficient_training(x, self.degree)
-        x = self.transform(x)
-        x = self.approximate_sum(self.width, x)
-        x = self.weight_mul(self.weight1, x)
-        x = self.coefficient_training(x, self.degree)
+        B, C, D = x.shape
+        x = self.coefficient_training(x)     # [B, C, degree]
+        x = self.transform(x)                        # factorial scale
+        x = self.approximate_sum(self.width, x)  # [B, C, s]
+        x = self.weight_mul(x)
+        x = self.coefficient_training(x)  # [B, out_channels, degree]
         x = self.inverse_transform(x)
-        x = self.approximate_sum(self.width, x).float()
-        return x
+        x = self.approximate_sum(self.width, x)  # [B, out_channels, s]
+
+        return x.float()
     
 class SNO1d(nn.Module):
-    def __init__(self, degree, width, s):
+    def __init__(self, degree, width, s, activation):
         super(SNO1d, self).__init__()
         self.degree = degree
         self.s = s
         self.width = width
+        self.activation = activation
 
-        self.fc0 = nn.Linear(1, self.width)
+        self.fc0 = nn.Linear(1, self.width) 
+        self.layer_norm = nn.LayerNorm(self.width)
 
         self.conv0 = Sumudu_Transform(self.width, self.width, self.degree, self.width, self.s)
         
@@ -138,7 +138,7 @@ class SNO1d(nn.Module):
 
         x = x.permute(0, 2, 1)
         x = self.fc1(x)
-        x = torch.tanh(x)
+        x = F.relu6(x)
         x = self.fc2(x)
         return x
   
@@ -157,11 +157,11 @@ batch_size_vali = 20
 epochs = 1000
 step_size = 100
 gamma = 0.5
-learning_rate = .001
+learning_rate = .002 #same as LNO
 width = 16
-degree = 4
+degree = 9 #Best Degree and Width found by optuna for 1d ode.
 
-reader = MatReader('C:\\Users\\benze\\Downloads\\SNO main\\SNO-main\\LNOReplication\\1D_Duffing_c0\\Data\\data.mat')
+reader = MatReader('\Data\data.mat') #File path to the data, in this case, the Duffing Oscillator w/o dampening
 x_train = reader.read_field('f_train')
 y_train = reader.read_field('u_train')
 grid_x_train = reader.read_field('x_train')
@@ -307,8 +307,3 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
-
-
-
-
-
