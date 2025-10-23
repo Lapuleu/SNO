@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import matplotlib.axes as ax
 import sys
+
 sample = 10
 ### Load data
 Lduffc0_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\LNOReplication\1D_Duffing_c0\Case_Dufc0_1\wave_states_test.mat")
@@ -30,252 +31,113 @@ FPend5_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\FNOReplicat
 
 Lduffc0_data_pointwise_prediction = Lduffc0_data.read_field('y_test')-Lduffc0_data.read_field('y_pred')
 Lduffc5_data_pointwise_prediction = Lduffc5_data.read_field('y_test')-Lduffc5_data.read_field('y_pred')
-LLor5_data_pointwise_prediction = LLor5_data.read_field('y_test')-LLor5_data.read_field('y_pred')
-LLor10_data_pointwise_prediction = LLor10_data.read_field('y_test')-LLor10_data.read_field('y_pred')
-LPend0_data_pointwise_prediction = LPend0_data.read_field('y_test')-LPend0_data.read_field('y_pred')             
-LPend5_data_pointwise_prediction = LPend5_data.read_field('y_test')-LPend5_data.read_field('y_pred')
+Llor5_data_pointwise_prediction = LLor5_data.read_field('y_test')-LLor5_data.read_field('y_pred')
+Llor10_data_pointwise_prediction = LLor10_data.read_field('y_test')-LLor10_data.read_field('y_pred')
+Lpend0_data_pointwise_prediction = LPend0_data.read_field('y_test')-LPend0_data.read_field('y_pred')             
+Lpend5_data_pointwise_prediction = LPend5_data.read_field('y_test')-LPend5_data.read_field('y_pred')
 Sduffc0_data_pointwise_prediction = Sduffc0_data.read_field('y_test')-Sduffc0_data.read_field('y_pred')
 Sduffc5_data_pointwise_prediction = Sduffc5_data.read_field('y_test')-Sduffc5_data.read_field('y_pred')
-SLor5_data_pointwise_prediction = SLor5_data.read_field('y_test')-SLor5_data.read_field('y_pred')
-SLor10_data_pointwise_prediction = SLor10_data.read_field('y_test')-SLor10_data.read_field('y_pred')
-SPend0_data_pointwise_prediction = SPend0_data.read_field('y_test')-SPend0_data.read_field('y_pred')
-SPend5_data_pointwise_prediction = SPend5_data.read_field('y_test')-SPend5_data.read_field('y_pred')
+Slor5_data_pointwise_prediction = SLor5_data.read_field('y_test')-SLor5_data.read_field('y_pred')
+Slor10_data_pointwise_prediction = SLor10_data.read_field('y_test')-SLor10_data.read_field('y_pred')
+Spend0_data_pointwise_prediction = SPend0_data.read_field('y_test')-SPend0_data.read_field('y_pred')
+Spend5_data_pointwise_prediction = SPend5_data.read_field('y_test')-SPend5_data.read_field('y_pred')
 Fduffc0_data_pointwise_prediction = Fduffc0_data.read_field('y_test')-Fduffc0_data.read_field('y_pred')
 Fduffc5_data_pointwise_prediction = Fduffc5_data.read_field('y_test')-Fduffc5_data.read_field('y_pred')
-FLor5_data_pointwise_prediction = FLor5_data.read_field('y_test')-FLor5_data.read_field('y_pred')
-FLor10_data_pointwise_prediction = FLor10_data.read_field('y_test')-FLor10_data.read_field('y_pred')
-FPend0_data_pointwise_prediction = FPend0_data.read_field('y_test')-FPend0_data.read_field('y_pred')
-FPend5_data_pointwise_prediction = FPend5_data.read_field('y_test')-FPend5_data.read_field('y_pred')
+Flor5_data_pointwise_prediction = FLor5_data.read_field('y_test')-FLor5_data.read_field('y_pred')
+Flor10_data_pointwise_prediction = FLor10_data.read_field('y_test')-FLor10_data.read_field('y_pred')
+Fpend0_data_pointwise_prediction = FPend0_data.read_field('y_test')-FPend0_data.read_field('y_pred')
+Fpend5_data_pointwise_prediction = FPend5_data.read_field('y_test')-FPend5_data.read_field('y_pred')
 
 duffc0_truth = Lduffc0_data.read_field('y_test')
 duffc5_truth = Lduffc5_data.read_field('y_test')
-Lor5_truth = LLor5_data.read_field('y_test')
-Lor10_truth = LLor10_data.read_field('y_test')
-Pend0_truth = LPend0_data.read_field('y_test')
-Pend5_truth = LPend5_data.read_field('y_test')
+lor5_truth = LLor5_data.read_field('y_test')
+lor10_truth = LLor10_data.read_field('y_test')
+pend0_truth = LPend0_data.read_field('y_test')
+pend5_truth = LPend5_data.read_field('y_test')
 grid = Lduffc0_data.read_field('x_test')
 
-### Plotting (Plotly)
-fig = make_subplots(rows=6, cols=4)
-fig.add_trace(
-    go.Scatter(y=duffc0_truth[sample,:], x=grid.squeeze()),
-    row=1, col=1
-)
 
-fig.add_trace(
-    go.Scatter(y=Sduffc0_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=1, col=2
-)
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
-fig.add_trace(
-    go.Scatter(y=Fduffc0_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=1, col=3
-)
-
-fig.add_trace(
-    go.Scatter(y=Lduffc0_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=1, col=4
-)
-
-fig.add_trace(
-    go.Scatter(y=duffc5_truth[sample,:], x=grid.squeeze()),
-    row=2, col=1
-)
-
-fig.add_trace(
-    go.Scatter(y=Sduffc5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=2, col=2
-)
-
-fig.add_trace(
-    go.Scatter(y=Fduffc5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=2, col=3
-)
-
-fig.add_trace(
-    go.Scatter(y=Lduffc5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=2, col=4
-)
-fig.add_trace(
-    go.Scatter(y=Lor5_truth[sample,:], x=grid.squeeze()),
-    row=3, col=1
-)
-
-fig.add_trace(
-    go.Scatter(y=SLor5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=3, col=2
-)
-
-fig.add_trace(
-    go.Scatter(y=FLor5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=3, col=3
-)
-fig.add_trace(
-    go.Scatter(y=LLor5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=3, col=4
-)
-fig.add_trace(
-    go.Scatter(y=Lor10_truth[sample,:], x=grid.squeeze()),
-    row=4, col=1
-)
-
-fig.add_trace(
-    go.Scatter(y=SLor10_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=4, col=2
-)
-
-fig.add_trace(
-    go.Scatter(y=FLor10_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=4, col=3
-)
-fig.add_trace(
-    go.Scatter(y=LLor10_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=4, col=4
-)
-
-fig.add_trace(
-    go.Scatter(y=Pend0_truth[sample,:], x=grid.squeeze()),
-    row=5, col=1
-)
-
-fig.add_trace(
-    go.Scatter(y=SPend0_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=5, col=2
-)
-
-fig.add_trace(
-    go.Scatter(y=FPend0_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=5, col=3
-)
-
-fig.add_trace(
-    go.Scatter(y=LPend0_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=5, col=4
-)
-fig.add_trace(
-    go.Scatter(y=Pend5_truth[sample,:], x=grid.squeeze()),
-    row=6, col=1
-)
-
-fig.add_trace(
-    go.Scatter(y=SPend5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=6, col=2
-)
-
-fig.add_trace(
-    go.Scatter(y=FPend5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=6, col=3
-)
-
-fig.add_trace(
-    go.Scatter(y=LPend5_data_pointwise_prediction[sample,:], x=grid.squeeze()),
-    row=6, col=4
-)
-fig.update_layout(
-    height=800, 
-    width=800,
-    title = "ODE Pointwise Prediction Errors",
-    showlegend=False
-)
-
-fig.write_image(r"C:\Users\benze\Downloads\line_plot.png")
-
-###Plotting (Matplotlib)
-models = ['Ground Truth', 'SNO', 'FNO', 'LNO']
-models_data = ['','S', 'F', 'L']
+# -----------------------------------------------
+# Configuration
+# -----------------------------------------------
+models = ['Truth', 'SNO', 'FNO', 'LNO']
+models_data = ['', 'S', 'F', 'L']
 tasks = ['Duffing', 'Lorenz', 'Pendulum']
-coefficients_Duffing = ['c=0', 'c=0.5']
-coefficients_Lorenz = ['ρ=5', 'ρ=10']
-coefficients_Pendulum = ['c=0', 'c=0.5']
-tasks_data = ['duffc0', 'duffc5', 'Lor5', 'Lor10', 'Pend0', 'Pend5']
+coefficients = {
+    'Duffing': ['c=0', 'c=0.5'],
+    'Lorenz': [r'ρ=5', r'ρ=10'],
+    'Pendulum': ['c=0', 'c=0.5']
+}
+tasks_data = {
+    'Duffing': ['duffc0', 'duffc5'],
+    'Lorenz': ['lor5', 'lor10'],
+    'Pendulum': ['pend0', 'pend5']
+}
 datas = ['_truth', '_data_pointwise_prediction', '_data_pointwise_prediction', '_data_pointwise_prediction']
 
-fig = plt.figure(constrained_layout=False, figsize=(30,40))
-fig.suptitle("ODE Pointwise Prediction Errors", fontsize=40)
-subfigs = fig.subfigures(nrows=3,ncols=1)
-subfigs_list = enumerate(subfigs)
-for (row, subfig), task in zip(subfigs_list, tasks):
-       subfig.supylabel(f"{task}" , fontsize=30)
-       subfigs2 = subfig.subfigures(nrows=2,ncols=1)
-       for subfig2, task_data, coeff in zip(subfigs2, tasks_data, globals()[f"coefficients_{task}"]):
-                subfig2.supylabel(f"{coeff}", fontsize=30)
-                axs = subfig2.subplots(nrows=1,ncols=4, width_ratios=[.5,.5,.5,.5])
-                for ax, model_data, data, model in zip(axs, models_data, datas, models):
-                    ax.plot(grid.squeeze(), globals()[f"{model_data}{task_data}{data}"][sample,:])
-                    if row == 0:
-                        ax.set_title(f"{model}")
-fig.savefig(r"C:\Users\benze\Downloads\line_plot_matplotlib.png")
-### Heatmap plots
-from D1utilities3 import *
-import plotly.graph_objs as go
-import plotly.express as px
-import pandas
-from plotly.subplots import make_subplots
-### Load data
-LNOBeam_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\LNOReplication\2D_Beam\Case_Beam_1\wave_states_test.mat")
-LNOBurger_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\LNOReplication\2D_Burger\Case_Burger_2\wave_states_test.mat")
-LNORDif_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\LNOReplication\2D_Reac_diffusion\Case_RDif_1\wave_states_test.mat")
-LNODif_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\LNOReplication\2D_Diffusion\Case_Diff_1\wave_states_test.mat")
-SNOBeam_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\Results\Case_SBeam_1\wave_states_test.mat")
-SNOBurger_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\Results\Case_SBurger_1\wave_states_test.mat")
-SNORDif_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\Results\Case_SRdiff_1\wave_states_test.mat")
-SNODif_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\Results\Case_Sdiff_1\wave_states_test.mat")
-FNOBeam_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\FNOReplication\Case_FBeam_1\wave_states_test.mat")
-FNOBurger_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\FNOReplication\Case_FBurger_1\wave_states_test.mat")
-FNORDif_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\FNOReplication\Case_FRdiff_1\wave_states_test.mat")
-FNODif_data = MatReader(r"C:\Users\benze\Downloads\SNO main\SNO-main\FNOReplication\Case_Fdiff_1\wave_states_test.mat")
 
-Beam_truth = LNOBeam_data.read_field('y_test')
-Burger_truth = LNOBurger_data.read_field('y_test')
-RDif_truth = LNORDif_data.read_field('y_test')
-Dif_truth = LNODif_data.read_field('y_test')
 
-LNOBeam_pred = LNOBeam_data.read_field('y_pred')-Beam_truth
-LNOBurger_pred = LNOBurger_data.read_field('y_pred')-Burger_truth
-LNORDif_pred = LNORDif_data.read_field('y_pred')-RDif_truth
-LNODif_pred = LNODif_data.read_field('y_pred')-Dif_truth
+# -----------------------------------------------
+# Plotting setup
+# -----------------------------------------------
+fig = plt.figure(figsize=(15, 15), constrained_layout=False)
+fig.suptitle("ODE Pointwise Prediction Errors", fontsize=24, y=0.995)
 
-SNOBeam_pred = SNOBeam_data.read_field('y_pred')-Beam_truth
-SNOBurger_pred = SNOBurger_data.read_field('y_pred')-Burger_truth
-SNORDif_pred = SNORDif_data.read_field('y_pred')-RDif_truth
-SNODif_pred = SNODif_data.read_field('y_pred')-Dif_truth
+# There are 3 tasks × 2 coefficients each → 6 major rows
+# Each coefficient has 1 row of plots (no stacked magnitude/error distinction)
+gs = gridspec.GridSpec(
+    nrows=6, ncols=4, figure=fig,
+    hspace=0.25, wspace=0.25,
+    left=0.08, right=0.97, top=0.95, bottom=0.05
+)
 
-FNOBeam_pred = FNOBeam_data.read_field('y_pred')-Beam_truth
-FNOBurger_pred = FNOBurger_data.read_field('y_pred')-Burger_truth
-FNORDif_pred = FNORDif_data.read_field('y_pred')-RDif_truth
-FNODif_pred = FNODif_data.read_field('y_pred')-Dif_truth
+# -----------------------------------------------
+# Plot each panel
+# -----------------------------------------------
+for task_idx, task in enumerate(tasks):
+    coeffs = coefficients[task]
+    task_data_list = tasks_data[task]
 
-###axes
-T_Beam = LNOBeam_data.read_field('T')
-X_Beam = LNOBeam_data.read_field('X')
-T_Burger = LNOBurger_data.read_field('T')
-X_Burger = LNOBurger_data.read_field('X')
-T_RDif = LNORDif_data.read_field('T')
-X_RDif = LNORDif_data.read_field('X')
-T_Dif = LNODif_data.read_field('T')
-X_Dif = LNODif_data.read_field('X')
-print(FNORDif_pred.shape)
-### Plotting
-sample = 10
-colorscale = 'Viridis'
-models = ['Ground Truth', 'SNO', 'FNO', 'LNO']
-models_data = ['','SNO', 'FNO', 'LNO']
-tasks = ['Beam', "Burger's", 'Reaction Diffusion', 'Diffusion']
-tasks_data = ['Beam', 'Burger', 'RDif', 'Dif']
-datas = ['_truth', '_pred', '_pred', '_pred']
+    for coeff_idx, (coeff_label, task_data) in enumerate(zip(coeffs, task_data_list)):
+        row = 2 * task_idx + coeff_idx
+        for col, (model, model_data, data_suffix) in enumerate(zip(models, models_data, datas)):
+            ax = fig.add_subplot(gs[row, col])
 
-fig = plt.figure(constrained_layout=True, figsize=(8.5, 11))
-fig.suptitle("PDE Pointwise Prediction Errors", fontsize=30)
-subfigs = fig.subfigures(nrows=4,ncols=1)
-subfigs_list = enumerate(subfigs)
-for (row, subfig), task_data, task in zip(subfigs_list, tasks_data, tasks):
-       subfig.supylabel(f"{task}" , fontsize=20)
-       for ax, model_data, data, model in zip(subfig.subplots(nrows=1,ncols=4), models_data, datas, models):
-            im = ax.imshow(globals()[f"{model_data}{task_data}{data}"][sample,:,:], cmap='jet', aspect='auto')
+            # Retrieve data using the globals() logic from your original code
+            data_name = globals()[f"{model_data}{task_data}{data_suffix}"][sample,:]
+
+            # Color by column group (each task/column could share color)
+            color_map = ['tab:red', 'tab:blue', 'tab:green', 'tab:purple']
+            ax.plot(grid.squeeze(), data_name, linewidth=2.5, color=color_map[col])
+
+            # Titles on top row only
             if row == 0:
-                ax.set_title(f"{model}")
-            cbar = fig.colorbar(im, ax=ax)
-            cbar.ax.tick_params(labelsize=10)
-            ax.tick_params(axis='both', which='major', labelsize=10)
+                ax.set_title(model, fontsize=13, pad=4)
 
-fig.savefig(r"C:\Users\benze\Downloads\heatmap_plot_matplotlib.png")
+            # Format axes
+            ax.tick_params(axis='both', which='both', length=0, labelsize=8)
+            ax.set_xlim([grid.min(), grid.max()])
+            if col == 0:
+                ax.set_ylabel("Magnitude (m)", fontsize=10)
+            if col == 1:
+                ax.set_ylabel("Error (m)", fontsize=10)
+
+            if row != 5:
+                ax.set_xticklabels([])
+            else:
+                ax.set_xlabel("Time (s)", fontsize=10)
+
+        # Add coefficient label (left)
+        y_center = 1 - (row + 0.5) / 6
+        fig.text(0.03, y_center, coeff_label, va='center', ha='center', rotation=90, fontsize=11)
+
+    # Add task label spanning both coefficient rows
+    y_center = 1 - (2 * task_idx + 1) / 6
+    fig.text(0.015, y_center, task, va='center', ha='center', rotation=90, fontsize=13, fontweight='bold')
+
+
+
+fig.savefig(r"C:\Users\benze\Downloads\line_plot_gridspec.png")
