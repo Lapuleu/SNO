@@ -15,6 +15,7 @@ import math
 import scipy.special as sp
 import scipy.io as sio
 import warnings
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 warnings.simplefilter('ignore', np.exceptions.RankWarning)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -176,143 +177,206 @@ class SNO2dmain():
     def supRes(self):
         save_index = 1
         current_directory = os.getcwd()
-        case = "Case_SBeamSR_"
+        case = "Case_SReDiffSR_"
         folder_index = str(save_index)
         results_dir = "/" + case + folder_index + "/"
         save_results_to = current_directory + results_dir
         os.makedirs(save_results_to, exist_ok=True)
 
         # --- Load data ---
-        reader = MatReader('/workspace/Data/Beam/data.mat')
-        x_test = reader.read_field('f_test')  # [B, Nx, Ny]
-        y_test = reader.read_field('u_test')  # [B, Nx, Ny]
+        reader = MatReader('/workspace/Data/ReacDiff/data.mat')
+        x_test = reader.read_field('f_test')
+        y_test = reader.read_field('u_test')
 
-        x_test = x_test.to(torch.float32).to(device)
-        y_test = y_test.to(torch.float32).to(device)
+        x_test = x_test.reshape(130,x_test.shape[1],x_test.shape[2],1)
+        x_test = torch.tensor(x_test, dtype=torch.float32, device=device)
+        y_test = torch.tensor(y_test, dtype=torch.float32, device=device)
 
         # --- Load trained model ---
-        model = torch.load("/workspace/Data/Beam/Wave_states", map_location=device, weights_only=False)
+        model = torch.load("/workspace/Data/ReacDiff/Wave_states", map_location=device, weights_only=False)
         model.eval()
 
-        s = 50     # base visualization resolution
-        new_s = 200  # super-res inference resolution
+        s = 40     # base visualization resolution
+        new_s = 160  # super-res inference resolution
         B = y_test.shape[0]
-        x_vals = np.linspace(0, 1, s)
-        y_vals = np.linspace(0, 1, s)
 
-        print(f"[Reconfiguring model for {new_s}x{new_s}]")
+        print(f"[Reconfiguring model for {new_s}x{new_s/2}]")
         print("[Running zero-shot super-resolution]...")
 
+        print("[Running base resolution inference]...")
+
+        # Create 2D grid for base resolution
+        model.conv0.s = s
+        with torch.no_grad():
+            y_pred_base = model(x_test)  # shape [B, s, s, 1]
+        y_pred_base = y_pred_base.squeeze(-1).cpu()
+
+        model.conv0.s = new_s
         with torch.no_grad():
             # Predict at high resolution
             y_pred_hr = model(x_test).permute(0, 3, 1, 2)  # [B, 1, Nx, Ny]
             y_pred_hr = F.interpolate(
-                y_pred_hr, size=(new_s, new_s), mode='bilinear', align_corners=False
+                y_pred_hr, size=(new_s, 20), mode='bilinear', align_corners=False
             ).squeeze(1)
-            y_true_hr = F.interpolate(
-                y_test.unsqueeze(1), size=(new_s, new_s), mode='bilinear', align_corners=False
-            ).squeeze(1)
-
-        mse_val = F.mse_loss(y_pred_hr, y_true_hr).item()
-        l2_val = torch.norm(y_pred_hr - y_true_hr).item()
+            y_true_hr = y_test#F.interpolate(
+                #y_test.unsqueeze(1), size=(new_s, new_s), mode='bilinear', align_corners=False
+            #).squeeze(1)
+            y_pred_lr = F.interpolate(y_pred_hr.unsqueeze(1), size=(s, 20), mode='bilinear', align_corners=False).squeeze(1)
+        mse_val = F.mse_loss(y_pred_lr, y_true_hr).item()
+        l2_val = torch.norm(y_pred_lr - y_true_hr).item()
         print(f"MSE={mse_val:.4e}, L2={l2_val:.4e}")
 
         # --- Downscale all fields to base resolution for visualization ---
-        y_true_lr = F.interpolate(y_true_hr.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1)
-        y_pred_lr = F.interpolate(y_pred_hr.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1)
-        y_base_lr = F.interpolate(y_test.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1)
+        #y_true_lr = F.interpolate(y_true_hr.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1)
+        #y_base_lr = F.interpolate(y_pred_base.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1)
 
-        y_true = y_true_lr.cpu().numpy()
+        y_true = y_true_hr.cpu().numpy() #y_true_lr.cpu().numpy()
         y_pred = y_pred_lr.cpu().numpy()
-        y_base = y_base_lr.cpu().numpy()
+        y_base = y_pred_base.cpu().numpy()#y_base_lr.cpu().numpy()
 
         # --- Compute errors at 200x200 (for quantitative metrics) ---
-        err_super_hr = torch.abs(y_pred_hr - y_true_hr)
-        err_base_hr = torch.abs(
-            F.interpolate(y_test.unsqueeze(1), size=(new_s, new_s), mode='bilinear', align_corners=False).squeeze(1)
-            - y_true_hr
-        )
+        err_super_hr = torch.abs(y_pred_lr - y_true_hr)
+        y_true_hr = y_true_hr.cpu()
+        err_base_hr = torch.abs(y_pred_base - y_true_hr)
 
         # --- Downscale errors for visualization ---
-        err_super = F.interpolate(err_super_hr.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
-        err_base = F.interpolate(err_base_hr.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+        err_super = err_super_hr#F.interpolate(err_super_hr.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+        err_base = err_base_hr#F.interpolate(err_base_hr.unsqueeze(1), size=(s, s), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
 
-        # --- Visualization Loop ---
-        for idx in range(1):
-            mean_true = y_true[idx].mean(axis=0)
-            mean_base = y_base[idx].mean(axis=0)
-            mean_super = y_pred[idx].mean(axis=0)
-            mean_err_base = err_base[idx].mean(axis=0)
-            mean_err_super = err_super[idx].mean(axis=0)
+        # === Visualization block ===
+        print("[Generating visualizations...]")
 
-            # Line plot comparison
-            plt.figure(figsize=(10, 6))
-            plt.plot(x_vals, mean_true, 'k--', label='Ground Truth')
-            plt.plot(x_vals, mean_base, 'b', label='Base (50x50)')
-            plt.plot(x_vals, mean_super, 'r', label='Super-Res (200x200 → 50x50)')
-            plt.title(f"Sample #{idx} — Mean Field Comparison")
-            plt.xlabel("X-axis")
-            plt.ylabel("Mean Field Value")
-            plt.legend()
-            plt.grid(alpha=0.4, linestyle='--')
-            plt.xticks(np.linspace(0, 1, 6))
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_results_to, f'sample_{idx}_mean_line.png'), dpi=300)
-            plt.close()
+        def to_numpy_safe(t):
+            """Convert PyTorch tensor or NumPy array to a 2D NumPy array."""
+            if isinstance(t, torch.Tensor):
+                t = t.detach().cpu().squeeze().numpy()
+            elif isinstance(t, np.ndarray):
+                t = np.squeeze(t)
+            else:
+                raise TypeError(f"Unsupported type: {type(t)}")
+            return t
 
-            # Error line plot
-            plt.figure(figsize=(10, 4))
-            plt.plot(x_vals, mean_err_base, 'b', label='|Error| Base vs GT')
-            plt.plot(x_vals, mean_err_super, 'r', label='|Error| Super-Res vs GT')
-            plt.title(f"Sample #{idx} — Mean Absolute Error")
-            plt.xlabel("X-axis")
-            plt.ylabel("|Error|")
-            plt.legend()
-            plt.grid(alpha=0.4, linestyle='--')
-            plt.xticks(np.linspace(0, 1, 6))
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_results_to, f'sample_{idx}_mean_error.png'), dpi=300)
-            plt.close()
+        y_true = to_numpy_safe(y_true_hr[0])
+        y_base_pred = to_numpy_safe(y_base[0])
+        y_super_pred = to_numpy_safe(y_pred_hr[0])
 
-            # --- Heatmaps (same color scale) ---
-            vmin_field = min(y_true[idx].min(), y_base[idx].min(), y_pred[idx].min())
-            vmax_field = max(y_true[idx].max(), y_base[idx].max(), y_pred[idx].max())
-            err_vmax = max(err_base[idx].max(), err_super[idx].max())
+        # Downscale everything to 50×50 for visualization
+        def downscale_to_50(tensor):
+            if isinstance(tensor, np.ndarray):
+                tensor = torch.tensor(tensor, dtype=torch.float32)
+            t = tensor.unsqueeze(0).unsqueeze(0)  # [1,1,Nx,Ny]
+            t = F.interpolate(t, size=(s, 20), mode='bilinear', align_corners=False)
+            return t.squeeze().cpu().numpy()
 
-            fig, axes = plt.subplots(4, 1, figsize=(8, 10), sharex=True)
-            extent = [0, 1, 0, 1]
+        y_true_50 = downscale_to_50(y_true)
+        y_base_50 = downscale_to_50(y_base_pred)
+        y_super_50 = downscale_to_50(y_super_pred)
 
-            im0 = axes[0].imshow(y_true[idx], origin='lower', extent=extent, cmap='viridis',
-                                 vmin=vmin_field, vmax=vmax_field)
-            axes[0].set_title('Ground Truth (Downscaled)')
-            plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+        # Compute error maps
+        err_base = np.abs(y_base_50 - y_true_50)
+        err_super = np.abs(y_super_50 - y_true_50)
 
-            im1 = axes[1].imshow(y_base[idx], origin='lower', extent=extent, cmap='viridis',
-                                 vmin=vmin_field, vmax=vmax_field)
-            axes[1].set_title('Base Prediction (50x50)')
-            plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        # Shared value and error scales
+        vmin = min(y_true_50.min(), y_base_50.min(), y_super_50.min())
+        vmax = max(y_true_50.max(), y_base_50.max(), y_super_50.max())
+        errmax = max(err_base.max(), err_super.max())
 
-            im2 = axes[2].imshow(y_pred[idx], origin='lower', extent=extent, cmap='viridis',
-                                 vmin=vmin_field, vmax=vmax_field)
-            axes[2].set_title('Super-Res (200x200 → 50x50)')
-            plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        y_true_sample = y_true_50
+        y_base_sample = y_base_50
+        y_super_sample = y_super_50
+        err_base_sample = np.abs(y_base_sample - y_true_sample)
+        err_super_sample = np.abs(y_super_sample - y_true_sample)
 
-            im3 = axes[3].imshow(err_super[idx], origin='lower', extent=extent, cmap='magma',
-                                 vmin=0, vmax=err_vmax)
-            axes[3].set_title('|Error| Super-Res vs GT (Downscaled)')
-            plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
+        nx, ny = y_true_sample.shape
+        extent = [0, nx, 0, ny]  # left, right, bottom, top
 
-            for ax in axes:
-                ax.set_xlabel("X-axis")
-                ax.set_ylabel("Y-axis")
-                ax.set_xticks(np.linspace(0, 1, 6))
-                ax.set_yticks(np.linspace(0, 1, 6))
-                ax.grid(alpha=0.3, linestyle='--', linewidth=0.5)
+        # === Create 2x3 heatmap figure ===
+        fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_results_to, f'sample_{idx}_heatmaps.png'), dpi=300)
-            plt.close()
+        # Use interpolation='bicubic' or 'bilinear' to avoid disconnected squares
+        interp_method = 'nearest'
 
+        # Row 1: Fields
+        im0 = axes[0,0].imshow(y_true_sample, cmap='viridis', vmin=vmin, vmax=vmax,
+                                origin='lower', extent=extent, aspect='auto', interpolation=interp_method)
+        axes[0,0].set_title("Ground Truth")
+
+        im1 = axes[0,1].imshow(y_base_sample, cmap='viridis', vmin=vmin, vmax=vmax,
+                                origin='lower', extent=extent, aspect='auto', interpolation=interp_method)
+        axes[0,1].set_title("Base Prediction")
+
+        im2 = axes[0,2].imshow(y_super_sample, cmap='viridis', vmin=vmin, vmax=vmax,
+                                origin='lower', extent=extent, aspect='auto', interpolation=interp_method)
+        axes[0,2].set_title("Super-Resolution Prediction")
+
+        # Row 2: Errors
+        im3 = axes[1,0].imshow(err_base_sample, cmap='inferno', vmin=0, vmax=errmax,
+                                origin='lower', extent=extent, aspect='auto', interpolation=interp_method)
+        axes[1,0].set_title("Base Error")
+
+        im4 = axes[1,1].imshow(err_super_sample, cmap='inferno', vmin=0, vmax=errmax,
+                                origin='lower', extent=extent, aspect='auto', interpolation=interp_method)
+        axes[1,1].set_title("Super-Resolution Error")
+
+        axes[1,2].axis("off")  # empty subplot
+
+        # Add vertical colorbars (as before)
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+        for ax, im, label in zip([axes[0,0], axes[0,1], axes[0,2]], [im0, im1, im2], ["Field Value"]*3):
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.1)
+            plt.colorbar(im, cax=cax, label=label)
+
+        for ax, im, label in zip([axes[1,0], axes[1,1]], [im3, im4], ["Absolute Error"]*2):
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.1)
+            plt.colorbar(im, cax=cax, label=label)
+
+        # Gridlines and ticks
+        for ax in axes.flatten():
+            ax.set_xticks(np.linspace(0, nx, 6))
+            ax.set_yticks(np.linspace(0, ny, 6))
+            ax.grid(True, color='white', alpha=0.3)
+            ax.set_xlabel("Time(s)")
+            ax.set_ylabel("Location(m)")
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, 'heatmaps_2d.png'), dpi=300)
+        plt.close(fig)
+
+        # === Line plots ===
+        center_idx = 25
+
+        # Center line
+        plt.figure(figsize=(8, 5))
+        plt.plot(y_true_50[center_idx, :], label="Ground Truth", lw=2)
+        plt.plot(y_base_50[center_idx, :], label="Base Prediction", lw=2)
+        plt.plot(y_super_50[center_idx, :], label="Super-Resolution", lw=2)
+        plt.xlabel("X Index")
+        plt.ylabel("Amplitude")
+        plt.title("Center Line (Row 25)")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, f'line_center.png'), dpi=300)
+        plt.close()
+
+        # Mean line
+        plt.figure(figsize=(8, 5))
+        plt.plot(y_true_50.mean(axis=0), label="Ground Truth", lw=2)
+        plt.plot(y_base_50.mean(axis=0), label="Base Prediction", lw=2)
+        plt.plot(y_super_50.mean(axis=0), label="Super-Resolution", lw=2)
+        plt.xlabel("X Index")
+        plt.ylabel("Amplitude (Row Mean)")
+        plt.title("Mean Line Across All Rows")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, f'line_mean.png'), dpi=300)
+        plt.close()
+
+        print("[Saved visualizations: heatmaps_2d.png, line_center.png, line_mean.png]")
         # --- Save metrics and outputs ---
         np.savetxt(os.path.join(save_results_to, "superres_metrics.txt"),
                    np.array([[mse_val, l2_val]]), header="MSE   L2")
