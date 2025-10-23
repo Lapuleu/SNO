@@ -24,25 +24,8 @@ print('Using device:', device)
 # Data Gen
 # ====================================
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import scipy.special as sp
-
-import torch
-import torch.nn as nn
-
 class Sumudu_Transform(nn.Module):
     def __init__(self, in_channels, out_channels, degree, width, s, device=None):
-        """
-        Vectorized, GPU-friendly Sumudu transform module.
-        - in_channels: input channels (i)
-        - out_channels: output channels (o)
-        - degree: polynomial degree (number of coefficients)
-        - width: number of evaluation points to approximate sum (s_grid size)
-        - s: grid size (number of x points used for approximation; same as `width` in semantics)
-        - device: optional (module buffers will still move with module.to(device))
-        """
         super().__init__()
         self.degree = degree
         self.width = width
@@ -50,56 +33,29 @@ class Sumudu_Transform(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        # learnable weights (use float64 for numerical stability)
         self.scale = 1.0 / (in_channels * out_channels)
-        self.weight1 = nn.Parameter(self.scale * torch.rand((in_channels, out_channels), dtype=torch.float64))
-        # keep the original flip if you want random +-1 behavior
+        self.weight1 = nn.Parameter(self.scale * torch.rand((in_channels, out_channels), dtype  =torch.float64))
         self.flip = (-1) ** torch.randint(0, 2, (in_channels, out_channels))
 
         dtype = torch.float64
-
-        # precompute x grid on [0,1] (matches original code)
         x_grid = torch.linspace(0.0, 1.0, steps=s, dtype=dtype)  # [s]
-
-        # Vandermonde matrix: [s, degree], highest power first (increasing=False)
         vander = torch.vander(x_grid, N=degree, increasing=False)  # [s, degree]
-
-        # pseudo-inverse of vander for fast polyfit: shape [degree, s]
-        # rcond chosen small to stabilize; you can tune
         vander_pinv = torch.linalg.pinv(vander, rcond=1e-6)
-
-        # Precompute factorials up to max(s, degree) (float64)
-        max_fact = max(s, degree)
-        # factorial(n) = exp(lgamma(n+1)); create tensor [1..max_fact]
-        idx = torch.arange(1, max_fact + 1, dtype=dtype)
-        fact = torch.exp(torch.lgamma(idx + 1.0))  # [max_fact]
-        # We'll store reversed like original code used .flip(0) sometimes; but keep direct ordering
-        # register buffers so they move with the module (and get saved in state_dict)
+        idx = torch.arange(1, s + 1, dtype=dtype)
+        fact = torch.exp(torch.lgamma(idx + 1.0))
         self.register_buffer('x_grid', x_grid)
         self.register_buffer('vander', vander)
         self.register_buffer('vander_pinv', vander_pinv)
         self.register_buffer('factorial', fact)  # factorial[n-1] == n!
 
     def coefficient_training(self, input):
-        """
-        Fit polynomial coefficients for each (batch, channel) using precomputed vander_pinv.
-        input: [B, C, D] where D is number of samples (must match self.s used to build vander)
-        returns: [B, C, degree]
-        """
         B, C, D = input.shape
-        # ensure double for numerical stability
         y = input.reshape(-1, D).double()  # [B*C, D]
-        # coef = (vander_pinv @ y.T).T  => [B*C, degree]
         coef = (self.vander_pinv[:, :D] @ y.T).T   # use only first D cols of vander_pinv if D < s
         coef = coef.reshape(B, C, -1)  # [B, C, degree]
         return coef
 
     def transform(self, input):
-        """
-        Multiply coefficients by factorials (elementwise). Input shape [B, C, degree]
-        """
-        D = input.shape[2]
-        # factorial indices: 0..D-1 correspond to 1..D so use factorial[:D]
         fact = self.factorial[:D].view(1, 1, -1)
         return input.double() * fact
 
@@ -109,42 +65,24 @@ class Sumudu_Transform(nn.Module):
         return input.double() / fact
 
     def approximate_sum(self, width, input):
-        """
-        Evaluate polynomial (coefficients in `input`) on the stored x_grid.
-        input: [B, C, degree]
-        returns: [B, C, s]  (s == self.s)
-        """
         B, C, degree = input.shape
-        # use vander[:, :degree] which is [s, degree]
         V = self.vander[:, :degree]   # [s, degree]
-        # compute output: (B*C, degree) @ (degree, s) -> (B*C, s) then reshape
         out = input.reshape(-1, degree).double() @ V.T   # [B*C, s]
         out = out.reshape(B, C, self.s)
         return out
 
     def weight_mul(self, input):
-        """
-        Multiply input [B, in_channels, s] by weight1 [in_channels, out_channels]
-        producing [B, out_channels, s]
-        """
-        # einsum keeps things vectorized and fast on GPU
         return torch.einsum("b i x, i o -> b o x", input.double(), self.weight1)
 
     def forward(self, x):
         B, C, D = x.shape
-        # Fit coefficients from raw samples -> [B, C, degree]
-        x = self.coefficient_training(x)     # [B, C, degree]
-        x = self.transform(x)                        # factorial scale
-        # evaluate polynomial on x_grid -> [B, C, s]
-        x = self.approximate_sum(self.width, x)  # [B, C, s]
-
-        # apply weight multiply -> [B, out_channels, s]
+        x = self.coefficient_training(x)    
+        x = self.transform(x)                       
+        x = self.approximate_sum(self.width, x)  
         x = self.weight_mul(x)
-
-        # Fit coefficients again on transformed channels (per original pipeline)
-        x = self.coefficient_training(x)  # [B, out_channels, degree]
+        x = self.coefficient_training(x) 
         x = self.inverse_transform(x)
-        x = self.approximate_sum(self.width, x)  # [B, out_channels, s]
+        x = self.approximate_sum(self.width, x)  
 
         return x.float()
     
@@ -173,27 +111,16 @@ class SNO1d(nn.Module):
         #x = torch.cat((x, grid), dim=-1)
         x = self.fc0(x)
         x = x.permute(0, 2, 1)
+        if self.s != x.shape[-1]:
+            x = F.interpolate(x, size=self.s, mode='linear', align_corners=False)
         x1 = self.conv0(x)
         x2 = self.w0(x)
-        # Match resolutions if different (super-resolution case)
         if x1.shape[-1] != x2.shape[-1]:
             x2 = F.interpolate(x2, size=x1.shape[-1], mode='linear', align_corners=False)
         x = self.bn0(x1 + x2)
-
         x = x.permute(0, 2, 1)
         x = self.fc1(x)
-        if self.activation == "relu":
-            x = F.relu(x)
-        elif self.activation == "leaky_relu":
-            x = F.leaky_relu(x)
-        elif self.activation == "relu6":
-            x = F.relu6(x)
-        elif self.activation == "gelu":
-            x = F.gelu(x)
-        elif self.activation == "tanh":
-            x = torch.tanh(x)
-        elif self.activation == "sin":
-            x = torch.sin(x)
+        x = F.relu6(x)
         x = self.fc2(x)
         return x
   
@@ -214,7 +141,7 @@ class SNO1dmain():
         # Configuration
         save_index = 1   
         current_directory = os.getcwd()
-        case = "Case_SDuf0SR_"
+        case = "Case_SPen05SR_"
         folder_index = str(save_index)
 
         results_dir = "/" + case + folder_index +"/"
@@ -222,14 +149,29 @@ class SNO1dmain():
         if not os.path.exists(save_results_to):
             os.makedirs(save_results_to)
 
-        # Load model
-        model = torch.load("/workspace/Wave_states", map_location=device, weights_only=False)
-        model.eval()
+        # Load test data (forcing term)
+        reader = MatReader('/workspace/Data/Pen05/data.mat')
+        x_test = reader.read_field('f_test')
+        y_test = reader.read_field('u_test')
+        grid_x_test = reader.read_field('x_test')
 
+        x_test = x_test.reshape(x_test.shape[0], 2048, 1)
+        x_test = x_test.detach().clone().to(torch.float32).to(device)
+        x_low = torch.linspace(0, 1, 2048).view(1, 1, -1).to(device)
+        # Load model
+        model = torch.load("/workspace/Data/Pen05/Wave_states", map_location=device, weights_only=False)
+        model.eval()
+        with torch.no_grad():
+            y_low = model(x_test)
+            y_low = y_low.permute(0, 2, 1)
+            y_base_up = F.interpolate(y_low, size=8192, mode='linear', align_corners=False)
+            y_base_up = y_base_up.permute(0, 2, 1)
         # Define higher-resolution grid
+        s = 2048
         new_s = 8192  # <-- super-res factor (e.g., 4× original 2048)
         dtype = torch.float64
-        x_grid_hr = torch.linspace(0.0, 1.0, steps=new_s, dtype=dtype)
+        
+        x_grid_hr = torch.linspace(0, 1, steps=new_s, dtype=dtype)
         vander_hr = torch.vander(x_grid_hr, N=model.conv0.degree, increasing=False)
         vander_pinv_hr = torch.linalg.pinv(vander_hr, rcond=1e-6)
 
@@ -247,27 +189,15 @@ class SNO1dmain():
 
         print(f"[Model reconfigured] New spatial resolution: {new_s}")
 
-        # Load test data (forcing term)
-        reader = MatReader('/workspace/Data/Duff0/data.mat')
-        x_test = reader.read_field('f_test')
-        y_test = reader.read_field('u_test')
-        grid_x_test = reader.read_field('x_test')
-
-        x_test = x_test.reshape(x_test.shape[0], 2048, 1)
-        x_test = x_test.detach().clone().to(torch.float32).to(device)
-
         # Run zero-shot super resolution
         print(f"[Running zero-shot super resolution inference] ...")
-        with torch.no_grad():
-            y_pred_hr = model(x_test).cpu().numpy()
-        
+
         # Measure inference time
         start_time = time.time()
         with torch.no_grad():
             y_pred_hr = model(x_test).cpu()
         elapsed_time = time.time() - start_time
 
-        # Compute loss metrics
         myloss = LpLoss(size_average=False)
 
         # Interpolate y_test to match high-res grid (if necessary)
@@ -290,16 +220,60 @@ class SNO1dmain():
 
         print("\n=============================")
         print("Zero-Shot Super-Resolution Results")
-        print("=============================")
+        print("=============================") 
         print(f"High-res points: {y_pred_hr.shape[1]}")
         print(f"Time elapsed: {elapsed_time:.4f} s")
         print(f"MSE: {mse.item():.4e}")
         print(f"L2 error: {l2.item():.4e}")
         print("=============================\n")
 
+        y_base_up = y_base_up.squeeze(-1)
+        y_pred_hr = y_pred_hr.cpu()
+        y_base_up = y_base_up.cpu()
+        print("y_pred_hr:", y_pred_hr.shape)
+        print("y_base_up:", y_base_up.shape)
+
+        mse1 = F.mse_loss(y_pred_hr, y_base_up).item()
+        rel_err = (torch.norm(y_pred_hr - y_base_up) / torch.norm(y_pred_hr)).item()
+
+        print(f"[Metrics] MSE = {mse1:.4e}, Relative Error = {rel_err:.4e}")
+
         x_highres = x_grid_hr.cpu().numpy()
         y_pred_hr_np = y_pred_hr.cpu().numpy() if torch.is_tensor(y_pred_hr) else y_pred_hr
         y_test_interp_np = y_test_interp.cpu().numpy()
+
+        plt.figure(figsize=(12, 5))
+
+        # Super-res prediction (red)
+        plt.subplot(1, 2, 1)
+        plt.plot(
+            torch.linspace(0, 1, y_pred_hr.shape[1]),
+            y_pred_hr[0].cpu(),
+            label=f'Super-res ({new_s})'
+        )
+
+        # Upscaled base (dashed)
+        plt.plot(
+            torch.linspace(0, 1, y_base_up.shape[1]),
+            y_base_up[0].cpu(),
+            '--',
+            label=f'Upscaled base ({s})'
+        )
+        plt.legend()
+        plt.xlabel("Spatial coordinate (x)")
+        plt.ylabel("Field value u(x)")
+        plt.title("Super-Resolution vs. Upscaled Base Output")
+
+        plt.subplot(1, 2, 2)
+        plt.plot(
+            torch.linspace(0, 1, y_base_up.shape[1]),
+            (y_pred_hr[0].cpu() - y_base_up[0].cpu()).abs(),
+            '--',
+        )
+        plt.title("Absolute Error (|Super - Upscaled Base|)")
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, f'basic_v_supres.png'), dpi=300)
+        plt.show()
 
         # Plot one random test example
         idx = 0
@@ -340,6 +314,8 @@ class SNO1dmain():
         sample_idx = 0
         error_map = np.abs(y_pred_hr_np[sample_idx] - y_test_interp_np[sample_idx])
         error_map_sample = error_map[np.newaxis, :]
+        vmin_all = min(y_pred_hr_np[sample_idx].min(), y_test_interp_np[sample_idx].min())
+        vmax_all = max(y_pred_hr_np[sample_idx].max(), y_test_interp_np[sample_idx].max())
 
         plt.figure(figsize=(10, 2))  # make height small
         plt.imshow(error_map_sample, extent=[x_highres[0], x_highres[-1], 0, 1],
@@ -352,36 +328,149 @@ class SNO1dmain():
         plt.savefig(os.path.join(save_results_to, 'error_heatmap.png'), dpi=300)
         plt.show()
 
-        """# Predicted vs Ground Truth field comparison
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+        # Predicted vs Ground Truth field comparison
+        sample_idx = 0  # or set a fixed one, e.g., 0
 
-        # Ground truth
-        im0 = axes[0].imshow(y_test_interp_np, extent=[x_highres[0], x_highres[-1], 0, y_test_interp_np.shape[0]],
-                            aspect='auto', origin='lower', cmap='viridis')
-        axes[0].set_title('Ground Truth (u_test)')
-        axes[0].set_xlabel('x (space or time)')
-        axes[0].set_ylabel('Test sample index')
-        fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+        y_true_sample = y_test_interp_np[sample_idx]
+        y_pred_sample = y_pred_hr_np[sample_idx]
+        error_sample = np.abs(y_pred_sample - y_true_sample)
 
-        # Prediction
-        im1 = axes[1].imshow(y_pred_hr_np, extent=[x_highres[0], x_highres[-1], 0, y_pred_hr_np.shape[0]],
-                            aspect='auto', origin='lower', cmap='viridis')
-        axes[1].set_title('Predicted (Super-Res)')
-        axes[1].set_xlabel('x (space or time)')
-        fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        # === Line plots for visual comparison ===
+        fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
-        # Absolute error
-        im2 = axes[2].imshow(error_map, extent=[x_highres[0], x_highres[-1], 0, error_map.shape[0]],
-                            aspect='auto', origin='lower', cmap='magma')
-        axes[2].set_title('|Error| = |u_pred - u_true|')
-        axes[2].set_xlabel('x (space or time)')
-        fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        axes[0].plot(x_highres, y_true_sample, 'k--', label='Ground Truth', linewidth=1.5)
+        axes[0].set_title(f'Test Sample #{sample_idx} — Ground Truth')
+        axes[0].legend()
+        axes[0].grid(alpha=0.3)
 
-        plt.suptitle('Zero-Shot Super-Resolution: Field Comparison and Error Map', fontsize=14, y=1.02)
+        axes[1].plot(x_highres, y_pred_sample, 'r', label='Prediction', linewidth=1.2)
+        axes[1].set_title('Model Prediction (Super-Res)')
+        axes[1].legend()
+        axes[1].grid(alpha=0.3)
+
+        axes[2].plot(x_highres, error_sample, 'm', label='|Error|', linewidth=1.0)
+        axes[2].set_title('Absolute Error Over Time')
+        axes[2].set_xlabel('t (time)')
+        axes[2].legend()
+        axes[2].grid(alpha=0.3)
+
         plt.tight_layout()
-        plt.savefig(os.path.join(save_results_to, 'superres_field_comparison.png'), dpi=300)
+        plt.savefig(os.path.join(save_results_to, f'sample_{sample_idx}_comparison_lineplots.png'), dpi=300)
         plt.show()
-        """
+
+        y_true = y_test_interp_np[sample_idx]
+        y_base = y_base_up[sample_idx].cpu().numpy()
+        y_super = y_pred_hr_np[sample_idx]
+
+        # Compute absolute errors
+        err_base = np.abs(y_base - y_true)
+        err_super = np.abs(y_super - y_true)
+        err_vmin, err_vmax = 0, max(err_base.max(), err_super.max())
+
+        # === Heatmaps of the same sample ===
+        fig, axes = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
+
+        # Expand each into [1, time] so imshow can render it
+        y_true_heat = y_true_sample[np.newaxis, :]
+        y_pred_heat = y_pred_sample[np.newaxis, :]
+        error_heat = error_sample[np.newaxis, :]
+
+        im0 = axes[0].imshow(y_true_heat, extent=[x_highres[0], x_highres[-1], 0, 1],
+                            aspect='auto', origin='lower', cmap='viridis', vmin = vmin_all, vmax = vmax_all)
+        axes[0].set_title(f'Ground Truth (Sample #{sample_idx})')
+        axes[0].set_ylabel('')
+        plt.colorbar(im0, ax=axes[0], orientation='vertical', fraction=0.046, pad=0.04)
+
+        im1 = axes[1].imshow(y_pred_heat, extent=[x_highres[0], x_highres[-1], 0, 1],
+                            aspect='auto', origin='lower', cmap='viridis', vmin = vmin_all, vmax = vmax_all)
+        axes[1].set_title('Prediction (Super-Res)')
+        axes[1].set_ylabel('')
+        plt.colorbar(im1, ax=axes[1], orientation='vertical', fraction=0.046, pad=0.04)
+
+        im2 = axes[2].imshow(error_heat, extent=[x_highres[0], x_highres[-1], 0, 1],
+                            aspect='auto', origin='lower', cmap='magma', vmin = 0, vmax = err_vmax)
+        axes[2].set_title('|Error| = |u_pred - u_true|')
+        axes[2].set_xlabel('t (time)')
+        axes[2].set_ylabel('')
+        plt.colorbar(im2, ax=axes[2], orientation='vertical', fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, f'sample_{sample_idx}_comparison_heatmaps.png'), dpi=300)
+        plt.show()
+
+        sample_idx = 0  # or choose any sample index
+        x_vals = x_highres  # common grid
+        y_true = y_test_interp_np[sample_idx]
+        y_base = y_base_up[sample_idx].cpu().numpy()
+        y_super = y_pred_hr_np[sample_idx]
+
+        # Compute absolute errors
+        err_base = np.abs(y_base - y_true)
+        err_super = np.abs(y_super - y_true)
+        vmin_all = min(y_true.min(), y_base.min(), y_super.min())
+        vmax_all = max(y_true.max(), y_base.max(), y_super.max())
+        err_vmin, err_vmax = 0, max(err_base.max(), err_super.max())
+
+        # === Line Plot Comparison ===
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_vals, y_true, 'k--', label='Ground Truth', linewidth=1.5)
+        plt.plot(x_vals, y_base, 'b', label='Base Upscaled', linewidth=1.2)
+        plt.plot(x_vals, y_super, 'r', label='Super-Res Prediction', linewidth=1.2)
+        plt.title(f"Test Sample #{sample_idx}: Ground Truth vs Base vs Super-Res")
+        plt.xlabel("Time (t)")
+        plt.ylabel("Displacement u(t)")
+        plt.legend()
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, f'sample_{sample_idx}_base_vs_super_lineplot.png'), dpi=300)
+        plt.show()
+
+        # === Absolute Error Line Plot ===
+        plt.figure(figsize=(10, 4))
+        plt.plot(x_vals, err_base, 'b', label='|Error| Base vs GT')
+        plt.plot(x_vals, err_super, 'r', label='|Error| Super-Res vs GT')
+        plt.title(f"Absolute Errors Comparison (Sample #{sample_idx})")
+        plt.xlabel("Time (t)")
+        plt.ylabel("|u_pred - u_true|")
+        plt.legend()
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, f'sample_{sample_idx}_error_lineplots.png'), dpi=300)
+        plt.show()
+
+        # === Heatmap Comparison ===
+        fig, axes = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
+
+        # GT
+        im0 = axes[0].imshow(y_true[np.newaxis, :], extent=[x_vals[0], x_vals[-1], 0, 1],
+                            aspect='auto', origin='lower', cmap='viridis', vmin=vmin_all, vmax=vmax_all)
+        axes[0].set_title(f'Ground Truth (Sample #{sample_idx})')
+        plt.colorbar(im0, ax=axes[0], orientation='vertical', fraction=0.046, pad=0.04)
+
+        # Base Upscaled
+        im1 = axes[1].imshow(y_base[np.newaxis, :], extent=[x_vals[0], x_vals[-1], 0, 1],
+                            aspect='auto', origin='lower', cmap='viridis', vmin=vmin_all, vmax=vmax_all)
+        axes[1].set_title('Base Upscaled Prediction')
+        plt.colorbar(im1, ax=axes[1], orientation='vertical', fraction=0.046, pad=0.04)
+
+        # Super-Res
+        im2 = axes[2].imshow(y_super[np.newaxis, :], extent=[x_vals[0], x_vals[-1], 0, 1],
+                            aspect='auto', origin='lower', cmap='viridis', vmin=vmin_all, vmax=vmax_all)
+        axes[2].set_title('Super-Resolution Prediction')
+        plt.colorbar(im2, ax=axes[2], orientation='vertical', fraction=0.046, pad=0.04)
+
+        # Errors heatmap (difference of both)
+        err_ratio = np.clip(err_base / (err_super + 1e-8), 0, 5)  # optional ratio comparison
+        im3 = axes[3].imshow(np.stack([err_base, err_super]).T[np.newaxis, :, 0], extent=[x_vals[0], x_vals[-1], 0, 1],
+                            aspect='auto', origin='lower', cmap='magma', vmin=err_vmin, vmax=err_vmax)
+        axes[3].set_title('|Error| Heatmap (Base vs Super)')
+        axes[3].set_xlabel("Time (t)")
+        plt.colorbar(im3, ax=axes[3], orientation='vertical', fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_results_to, f'sample_{sample_idx}_base_vs_super_heatmaps.png'), dpi=300)
+        plt.show()
+        
         # Save results
         np.savetxt(save_results_to + "/superres_metrics.txt", 
            np.array([[mse.item(), l2.item(), elapsed_time]]),
