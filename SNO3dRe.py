@@ -17,6 +17,9 @@ import scipy.special as sp
 import warnings
 warnings.simplefilter('ignore', np.exceptions.RankWarning)
 
+torch.manual_seed(0)
+np.random.seed(0)
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
 torch.backends.cudnn.benchmark = True
@@ -372,3 +375,4 @@ class main():
         print('Testing error: %.3e' % (test_l2))
         print("=============================\n")
 main(degree=4).train()
+
