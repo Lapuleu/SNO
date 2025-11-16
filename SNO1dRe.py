@@ -16,6 +16,9 @@ import scipy.special as sp
 import warnings
 warnings.simplefilter('ignore', np.exceptions.RankWarning)
 
+torch.manual_seed(0)
+np.random.seed(0)
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
 
@@ -307,6 +310,7 @@ ax.set_ylabel('Loss')
 ax.set_xlabel('Epochs')
 ax.legend(loc='upper left')
 fig.savefig(save_results_to+'loss_history.png')
+
 
 
 
